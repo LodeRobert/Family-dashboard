@@ -1,12 +1,15 @@
+# Multi-stage Dockerfile voor HomeBoard
+# Stage 1: Build frontend
 FROM node:20-alpine AS builder
-
 WORKDIR /app
+
 COPY package*.json ./
 RUN npm install
 
 COPY . .
 RUN npm run build
 
+# Stage 2: Production runner
 FROM node:20-alpine AS runner
 WORKDIR /app
 
@@ -21,12 +24,11 @@ COPY --from=builder /app/dist ./dist
 COPY server.ts ./
 COPY firebase-applet-config.json ./
 
-# Install tsx for running server.ts directly
-RUN npm install -g tsx
-
+# Zorg dat de persistente datamap bestaat
 RUN mkdir -p /data
 VOLUME ["/data"]
 
 EXPOSE 3000
 
-CMD ["tsx", "server.ts"]
+# Start de full-stack server
+CMD ["npx", "tsx", "server.ts"]

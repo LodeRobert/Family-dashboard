@@ -1,6 +1,15 @@
-# HomeBoard Docker Compose
-# Starten: docker compose up -d --build
-# Data wordt veilig bewaard in de lokale map ./data
+# ==============================================================================
+# HomeBoard - Docker Compose Configuratie
+# ==============================================================================
+# Snel starten:
+#   docker compose up -d --build
+#
+# Logboeken bekijken:
+#   docker compose logs -f
+#
+# Container stoppen:
+#   docker compose down
+# ==============================================================================
 
 version: '3.8'
 
@@ -11,14 +20,36 @@ services:
       dockerfile: Dockerfile
     container_name: homeboard
     restart: unless-stopped
+
+    # --------------------------------------------------------------------------
+    # POORTMAPPING (Pas de linkerkant aan als poort 3000 al bezet is)
+    # Formaat: "HOST_POORT:CONTAINER_POORT"
+    # Voorbeeld: "8080:3000" maakt de app bereikbaar via http://jouw-ip:8080
+    # --------------------------------------------------------------------------
     ports:
       - "${PORT:-3000}:3000"
+
+    # --------------------------------------------------------------------------
+    # OMGEVINGSVARIABELEN
+    # --------------------------------------------------------------------------
     environment:
       - NODE_ENV=production
       - PORT=3000
       - DATA_DIR=/data
+
+    # --------------------------------------------------------------------------
+    # PERSISTENTE DATA OPSLAG
+    # Alle agenda's, taken, gezinsleden en instellingen worden bewaard in de
+    # lokale map './data' op je host server. Zelfs bij het updaten van de
+    # container blijft al je data 100% veilig bewaard.
+    # --------------------------------------------------------------------------
     volumes:
       - ./data:/data
+
+    # --------------------------------------------------------------------------
+    # HEALTHCHECK
+    # Controleert automatisch of de applicatie gezond draait
+    # --------------------------------------------------------------------------
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/api/health"]
       interval: 30s
