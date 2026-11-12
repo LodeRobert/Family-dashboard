@@ -1,0 +1,26 @@
+# HomeBoard Docker Compose
+# Starten: docker compose up -d --build
+# Data wordt veilig bewaard in de lokale map ./data
+
+version: '3.8'
+
+services:
+  homeboard:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: homeboard
+    restart: unless-stopped
+    ports:
+      - "${PORT:-3000}:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - DATA_DIR=/data
+    volumes:
+      - ./data:/data
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3

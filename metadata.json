@@ -1,0 +1,6 @@
+{
+  "name": "HomeBoard - Slim Familie Dashboard & Agenda",
+  "description": "Zelf-gehost familie dashboard en interactieve agendaplanner met Google Agenda integratie, takenbord en Docker Compose ondersteuning.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
