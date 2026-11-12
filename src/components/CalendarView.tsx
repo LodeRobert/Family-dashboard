@@ -186,11 +186,11 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
         </div>
 
         {/* View mode toggle + Add Event + Manage Calendars */}
-        <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex items-center gap-2 flex-wrap w-full sm:w-auto justify-between sm:justify-end">
           <div className="flex items-center p-1 bg-slate-100 dark:bg-slate-800 rounded-lg text-xs font-medium">
             <button
               onClick={() => setViewMode('day')}
-              className={`px-2.5 py-1 rounded-md transition-colors ${
+              className={`px-2 sm:px-2.5 py-1 rounded-md transition-colors ${
                 viewMode === 'day'
                   ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs font-semibold'
                   : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
@@ -200,7 +200,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
             </button>
             <button
               onClick={() => setViewMode('week')}
-              className={`px-2.5 py-1 rounded-md transition-colors ${
+              className={`px-2 sm:px-2.5 py-1 rounded-md transition-colors ${
                 viewMode === 'week'
                   ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs font-semibold'
                   : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
@@ -210,7 +210,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
             </button>
             <button
               onClick={() => setViewMode('month')}
-              className={`px-2.5 py-1 rounded-md transition-colors ${
+              className={`px-2 sm:px-2.5 py-1 rounded-md transition-colors ${
                 viewMode === 'month'
                   ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs font-semibold'
                   : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
@@ -220,7 +220,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
             </button>
             <button
               onClick={() => setViewMode('agenda')}
-              className={`px-2.5 py-1 rounded-md transition-colors ${
+              className={`px-2 sm:px-2.5 py-1 rounded-md transition-colors ${
                 viewMode === 'agenda'
                   ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs font-semibold'
                   : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
@@ -230,21 +230,23 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
             </button>
           </div>
 
-          <button
-            onClick={onOpenManageCalendars}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 transition-colors"
-          >
-            <Settings className="w-3.5 h-3.5" />
-            <span>Koppelingen</span>
-          </button>
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={onOpenManageCalendars}
+              className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs font-medium rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 transition-colors"
+            >
+              <Settings className="w-3.5 h-3.5" />
+              <span className="hidden xs:inline">Koppelingen</span>
+            </button>
 
-          <button
-            onClick={() => onOpenNewEvent()}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-xs transition-colors"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            <span>Afspraak</span>
-          </button>
+            <button
+              onClick={() => onOpenNewEvent()}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-xs transition-colors"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Afspraak</span>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -305,7 +307,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                 <div
                   key={idx}
                   onClick={() => onOpenNewEvent(dayObj.dateStr)}
-                  className={`min-h-[96px] sm:min-h-[120px] p-1.5 sm:p-2 cursor-pointer transition-colors hover:bg-indigo-50/20 dark:hover:bg-indigo-950/20 ${
+                  className={`min-h-[70px] sm:min-h-[110px] p-1 sm:p-2 cursor-pointer transition-colors hover:bg-indigo-50/20 dark:hover:bg-indigo-950/20 ${
                     !dayObj.isCurrentMonth
                       ? 'bg-slate-50/50 dark:bg-slate-950/40 text-slate-400 dark:text-slate-600'
                       : 'text-slate-900 dark:text-slate-100'

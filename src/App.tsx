@@ -8,6 +8,7 @@ import {
   ViewTab
 } from './types';
 import { TopBar } from './components/TopBar';
+import { BottomNavBar } from './components/BottomNavBar';
 import { DashboardView } from './components/DashboardView';
 import { CalendarView } from './components/CalendarView';
 import { ChoresView } from './components/ChoresView';
@@ -17,8 +18,7 @@ import { ManageCalendarsModal } from './components/ManageCalendarsModal';
 import {
   initAuth,
   googleSignIn,
-  logoutGoogle,
-  getAccessToken
+  logoutGoogle
 } from './services/firebaseAuth';
 import {
   fetchGoogleCalendarList,
@@ -192,32 +192,27 @@ export default function App() {
 
   // Google OAuth Handlers
   const handleGoogleSignIn = async () => {
-    try {
-      const result = await googleSignIn();
-      if (result) {
-        setGoogleUser(result.user);
-        setGoogleToken(result.accessToken);
-        const gCals = await fetchGoogleCalendarList();
-        setAvailableGoogleCalendars(gCals);
+    const result = await googleSignIn();
+    if (result) {
+      setGoogleUser(result.user);
+      setGoogleToken(result.accessToken);
+      const gCals = await fetchGoogleCalendarList();
+      setAvailableGoogleCalendars(gCals);
 
-        if (appState && gCals.length > 0) {
-          // Check if primary calendar should be added
-          const existingIds = new Set(appState.calendars.map(c => c.id));
-          const newCals = [...appState.calendars];
-          for (const cal of gCals) {
-            if (!existingIds.has(cal.id)) {
-              newCals.push(cal);
-              break; // add at least first
-            }
+      if (appState && gCals.length > 0) {
+        const existingIds = new Set(appState.calendars.map(c => c.id));
+        const newCals = [...appState.calendars];
+        for (const cal of gCals) {
+          if (!existingIds.has(cal.id)) {
+            newCals.push(cal);
+            break;
           }
-          const updatedState = { ...appState, calendars: newCals };
-          setAppState(updatedState);
-          await saveAppState(updatedState);
-          await refreshExternalCalendars(newCals, result.accessToken);
         }
+        const updatedState = { ...appState, calendars: newCals };
+        setAppState(updatedState);
+        await saveAppState(updatedState);
+        await refreshExternalCalendars(newCals, result.accessToken);
       }
-    } catch (err: any) {
-      alert(`Inloggen bij Google mislukt: ${err.message}`);
     }
   };
 
@@ -260,7 +255,7 @@ export default function App() {
 
     // If writing to a Google Calendar
     if (targetCal?.type === 'google_oauth' && targetCal.googleId) {
-      const res = await createGoogleEvent(targetCal.googleId, {
+      await createGoogleEvent(targetCal.googleId, {
         title: eventData.title!,
         description: eventData.description,
         startTime: eventData.startTime!,
@@ -269,7 +264,6 @@ export default function App() {
         location: eventData.location
       });
 
-      // Refresh Google events
       if (googleToken) {
         await refreshExternalCalendars(appState.calendars, googleToken);
       }
@@ -278,7 +272,6 @@ export default function App() {
 
     // Otherwise save to local calendar events
     if (eventData.id) {
-      // Edit existing
       await updateStateAndPersist(prev => ({
         ...prev,
         events: prev.events.map(e =>
@@ -293,7 +286,6 @@ export default function App() {
         )
       }));
     } else {
-      // Create new local event
       const newEvent: CalendarEvent = {
         id: 'evt-' + Math.random().toString(36).substring(2, 9),
         calendarId: eventData.calendarId || appState.calendars[0]?.id || 'cal-family',
@@ -320,7 +312,6 @@ export default function App() {
 
     const targetCal = appState.calendars.find(c => c.id === calendarId);
 
-    // If event belongs to Google Calendar
     if (targetCal?.type === 'google_oauth' && targetCal.googleId) {
       await deleteGoogleEvent(targetCal.googleId, eventId);
       if (googleToken) {
@@ -329,7 +320,6 @@ export default function App() {
       return;
     }
 
-    // Otherwise delete from local storage
     await updateStateAndPersist(prev => ({
       ...prev,
       events: prev.events.filter(e => e.id !== eventId)
@@ -338,10 +328,10 @@ export default function App() {
 
   // Calendar Management Handlers
   const handleAddCalendar = async (cal: CalendarSource) => {
-    await updateStateAndPersist(prev => {
-      const next = { ...prev, calendars: [...prev.calendars, cal] };
-      return next;
-    });
+    await updateStateAndPersist(prev => ({
+      ...prev,
+      calendars: [...prev.calendars, cal]
+    }));
     if (appState) {
       refreshExternalCalendars([...appState.calendars, cal], googleToken);
     }
@@ -364,7 +354,7 @@ export default function App() {
     }));
   };
 
-  // Chore & Rewards Handlers (Home-Board style)
+  // Chore & Rewards Handlers
   const handleToggleChore = async (choreId: string) => {
     if (!appState) return;
     const chore = appState.chores.find(c => c.id === choreId);
@@ -450,19 +440,18 @@ export default function App() {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-200">
         <div className="text-center space-y-3">
-          <div className="w-12 h-12 border-3 border-indigo-600 border-t-transparent rounded-full animate-spin mx-auto"></div>
+          <div className="w-10 h-10 border-3 border-indigo-600 border-t-transparent rounded-full animate-spin mx-auto"></div>
           <p className="text-sm font-semibold">HomeBoard wordt geladen...</p>
         </div>
       </div>
     );
   }
 
-  // Combine local events with external (Google Calendar + iCal) events
   const combinedEvents = [...appState.events, ...externalEvents];
 
   return (
     <div className={`min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 transition-colors ${isKiosk ? 'p-2 sm:p-4' : ''}`}>
-      {/* Top Bar Header */}
+      {/* Top Bar Header (Desktop & Mobile Compact) */}
       {!isKiosk && (
         <TopBar
           currentTab={currentTab}
@@ -478,35 +467,35 @@ export default function App() {
 
       {/* Kiosk Mode Floating Controls */}
       {isKiosk && (
-        <div className="fixed top-3 right-3 z-50 flex items-center gap-2 bg-slate-900/80 backdrop-blur-md px-3 py-1.5 rounded-full border border-slate-700 text-xs shadow-lg">
+        <div className="fixed top-3 right-3 z-50 flex items-center gap-1.5 bg-slate-900/90 backdrop-blur-md px-3 py-1.5 rounded-full border border-slate-700 text-xs shadow-lg">
           <button
             onClick={() => setCurrentTab('dashboard')}
-            className={`px-2 py-1 rounded-md ${currentTab === 'dashboard' ? 'bg-indigo-600 text-white font-bold' : 'text-slate-300'}`}
+            className={`px-2.5 py-1 rounded-md transition-colors ${currentTab === 'dashboard' ? 'bg-indigo-600 text-white font-bold' : 'text-slate-300'}`}
           >
             Dashboard
           </button>
           <button
             onClick={() => setCurrentTab('calendar')}
-            className={`px-2 py-1 rounded-md ${currentTab === 'calendar' ? 'bg-indigo-600 text-white font-bold' : 'text-slate-300'}`}
+            className={`px-2.5 py-1 rounded-md transition-colors ${currentTab === 'calendar' ? 'bg-indigo-600 text-white font-bold' : 'text-slate-300'}`}
           >
             Kalender
           </button>
           <button
             onClick={() => setCurrentTab('chores')}
-            className={`px-2 py-1 rounded-md ${currentTab === 'chores' ? 'bg-indigo-600 text-white font-bold' : 'text-slate-300'}`}
+            className={`px-2.5 py-1 rounded-md transition-colors ${currentTab === 'chores' ? 'bg-indigo-600 text-white font-bold' : 'text-slate-300'}`}
           >
             Taken
           </button>
           <button
             onClick={toggleDarkMode}
-            className="p-1 text-slate-300 hover:text-white"
+            className="p-1.5 text-slate-300 hover:text-white"
             title="Thema wisselen"
           >
             {isDarkMode ? '☀️' : '🌙'}
           </button>
           <button
             onClick={toggleKiosk}
-            className="p-1 text-amber-400 hover:text-amber-300 font-semibold"
+            className="p-1.5 text-amber-400 hover:text-amber-300 font-bold"
             title="Kiosk sluiten"
           >
             ✕
@@ -514,8 +503,8 @@ export default function App() {
         </div>
       )}
 
-      {/* Main View Area */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6">
+      {/* Main Viewport Content */}
+      <main className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 pt-4 sm:pt-6 pb-24 md:pb-12">
         {currentTab === 'dashboard' && (
           <DashboardView
             events={combinedEvents}
@@ -566,6 +555,14 @@ export default function App() {
           />
         )}
       </main>
+
+      {/* Mobile Fixed Bottom Navigation Bar (Visible only on GSM / screens < md) */}
+      {!isKiosk && (
+        <BottomNavBar
+          currentTab={currentTab}
+          onTabChange={setCurrentTab}
+        />
+      )}
 
       {/* Modals */}
       <EventModal

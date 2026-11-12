@@ -10,7 +10,10 @@ import {
   Check,
   AlertCircle,
   ExternalLink,
-  LogOut
+  LogOut,
+  Sparkles,
+  Info,
+  Link
 } from 'lucide-react';
 import { User } from 'firebase/auth';
 
@@ -45,63 +48,80 @@ export const ManageCalendarsModal: React.FC<ManageCalendarsModalProps> = ({
   onImportGoogleCalendar,
   onSyncAll
 }) => {
-  const [activeTab, setActiveTab] = useState<'google' | 'ical' | 'local'>('google');
-  const [icalName, setIcalName] = useState('');
-  const [icalUrl, setIcalUrl] = useState('');
-  const [icalColor, setIcalColor] = useState('#10B981');
+  const [activeTab, setActiveTab] = useState<'quick_google' | 'oauth' | 'all'>('quick_google');
+  const [googleIcalUrl, setGoogleIcalUrl] = useState('');
+  const [googleCalName, setGoogleCalName] = useState('Mijn Google Agenda');
+  const [googleCalColor, setGoogleCalColor] = useState('#4285F4');
   const [isTestingIcal, setIsTestingIcal] = useState(false);
   const [icalError, setIcalError] = useState('');
+  const [icalSuccess, setIcalSuccess] = useState('');
   const [isSyncing, setIsSyncing] = useState(false);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [oauthError, setOauthError] = useState<string | null>(null);
 
   if (!isOpen) return null;
 
-  const handleAddIcal = async (e: React.FormEvent) => {
+  const handleAddGoogleIcal = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!icalName.trim() || !icalUrl.trim()) return;
+    if (!googleIcalUrl.trim()) {
+      setIcalError('Vul een geldige Google Agenda iCal URL in.');
+      return;
+    }
 
     try {
       setIsTestingIcal(true);
       setIcalError('');
+      setIcalSuccess('');
 
-      // Test feed with backend proxy
+      const cleanUrl = googleIcalUrl.trim();
       const testRes = await fetch(
-        `/api/ical/fetch?url=${encodeURIComponent(icalUrl.trim())}&calendarName=${encodeURIComponent(icalName.trim())}`
+        `/api/ical/fetch?url=${encodeURIComponent(cleanUrl)}&calendarName=${encodeURIComponent(googleCalName.trim())}&calendarColor=${encodeURIComponent(googleCalColor)}`
       );
+
       if (!testRes.ok) {
-        throw new Error('Kon iCal feed niet verifiëren. Controleer de URL.');
+        throw new Error('De server kon de iCal URL niet bereiken. Controleer of de link klopt.');
       }
+
       const data = await testRes.json();
       if (data.error) {
         throw new Error(data.error);
       }
 
-      onAddCalendar({
-        id: 'ical-' + Math.random().toString(36).substring(2, 9),
-        name: icalName.trim(),
-        color: icalColor,
+      const newCal: CalendarSource = {
+        id: 'gcal-ical-' + Math.random().toString(36).substring(2, 9),
+        name: googleCalName.trim() || 'Google Agenda',
+        color: googleCalColor,
         type: 'ical',
         visible: true,
-        url: icalUrl.trim(),
-        description: `iCal feed (${data.count || 0} afspraken gevonden)`
-      });
+        url: cleanUrl,
+        description: `Google Agenda feed (${data.count || 0} afspraken gesynchroniseerd)`
+      };
 
-      setIcalName('');
-      setIcalUrl('');
-      alert(`iCal feed succesvol toegevoegd met ${data.count || 0} afspraken!`);
+      onAddCalendar(newCal);
+      setGoogleIcalUrl('');
+      setIcalSuccess(`Google Agenda succesvol gekoppeld! (${data.count || 0} afspraken geladen)`);
     } catch (err: any) {
-      setIcalError(err.message || 'Fout bij toevoegen iCal feed.');
+      setIcalError(err.message || 'Fout bij het ophalen van de Google Agenda.');
     } finally {
       setIsTestingIcal(false);
     }
   };
 
+  const handleLoadSampleHolidays = async () => {
+    // Official Google public holidays calendar for Netherlands
+    const holidayUrl = 'https://calendar.google.com/calendar/ical/nl.dutch%23holiday%40group.v.calendar.google.com/public/basic.ics';
+    setGoogleCalName('Nederlandse Feestdagen (Google)');
+    setGoogleIcalUrl(holidayUrl);
+    setGoogleCalColor('#F59E0B');
+  };
+
   const handleLogin = async () => {
     try {
       setIsLoggingIn(true);
+      setOauthError(null);
       await onGoogleSignIn();
-    } catch (err) {
-      console.error(err);
+    } catch (err: any) {
+      setOauthError(err.message || 'Inloggen met Google mislukt.');
     } finally {
       setIsLoggingIn(false);
     }
@@ -117,78 +137,223 @@ export const ManageCalendarsModal: React.FC<ManageCalendarsModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs">
-      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xl w-full max-w-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150 flex flex-col max-h-[90vh]">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/70 backdrop-blur-xs">
+      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl w-full max-w-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150 flex flex-col max-h-[92vh]">
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 dark:border-slate-800">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 dark:border-slate-800">
           <div className="flex items-center gap-2.5">
-            <CalendarIcon className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
-            <h3 className="text-base font-bold text-slate-900 dark:text-white">
-              Agenda Koppelingen & Beheer
-            </h3>
+            <div className="w-8 h-8 rounded-lg bg-indigo-50 dark:bg-indigo-950/60 flex items-center justify-center text-indigo-600 dark:text-indigo-400">
+              <CalendarIcon className="w-4 h-4" />
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-slate-900 dark:text-white leading-tight">
+                Google Agenda & Koppelingen
+              </h3>
+              <p className="text-[11px] text-slate-500">
+                Koppel al je persoonlijke en gezamenlijke agenda's
+              </p>
+            </div>
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-lg transition-colors"
+            className="min-w-[40px] min-h-[40px] flex items-center justify-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-lg transition-colors"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
         {/* Sync All button & Active Calendars Summary */}
-        <div className="px-6 py-3 bg-slate-50 dark:bg-slate-800/50 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between gap-3 text-xs">
-          <span className="text-slate-500">
-            {calendars.length} gekoppelde agenda('s) · {calendars.filter(c => c.visible).length} zichtbaar
+        <div className="px-5 py-2.5 bg-slate-50 dark:bg-slate-800/40 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between gap-3 text-xs">
+          <span className="text-slate-600 dark:text-slate-400 font-medium">
+            {calendars.length} gekoppelde agenda('s) · {calendars.filter(c => c.visible).length} actief
           </span>
           <button
             onClick={handleSync}
             disabled={isSyncing}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 font-semibold text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg hover:bg-slate-100 transition-colors"
+            className="inline-flex items-center gap-1.5 px-3 py-1 font-semibold text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
-            <span>Nu synchroniseren</span>
+            <span>Nu verversen</span>
           </button>
         </div>
 
-        {/* Tabs: Google Agenda | iCal Feeds | Huidige Agenda's */}
-        <div className="flex items-center gap-2 px-6 pt-4 border-b border-slate-200 dark:border-slate-800 pb-2 text-xs font-semibold">
+        {/* Tabs */}
+        <div className="flex items-center gap-1 sm:gap-2 px-5 pt-3 border-b border-slate-200 dark:border-slate-800 pb-2 text-xs font-semibold overflow-x-auto">
           <button
-            onClick={() => setActiveTab('google')}
-            className={`px-3 py-1.5 rounded-lg transition-colors ${
-              activeTab === 'google'
+            onClick={() => setActiveTab('quick_google')}
+            className={`px-3 py-2 rounded-lg transition-colors whitespace-nowrap flex items-center gap-1.5 ${
+              activeTab === 'quick_google'
                 ? 'bg-indigo-600 text-white shadow-xs'
                 : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
             }`}
           >
-            Google Agenda (OAuth)
+            <Link className="w-3.5 h-3.5" />
+            <span>Direct Koppelen (iCal / Preview)</span>
           </button>
+
           <button
-            onClick={() => setActiveTab('ical')}
-            className={`px-3 py-1.5 rounded-lg transition-colors ${
-              activeTab === 'ical'
+            onClick={() => setActiveTab('oauth')}
+            className={`px-3 py-2 rounded-lg transition-colors whitespace-nowrap flex items-center gap-1.5 ${
+              activeTab === 'oauth'
                 ? 'bg-indigo-600 text-white shadow-xs'
                 : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
             }`}
           >
-            iCal / ICS Feed Toevoegen
+            <Globe className="w-3.5 h-3.5" />
+            <span>Inloggen met Google (OAuth)</span>
           </button>
+
           <button
-            onClick={() => setActiveTab('local')}
-            className={`px-3 py-1.5 rounded-lg transition-colors ${
-              activeTab === 'local'
+            onClick={() => setActiveTab('all')}
+            className={`px-3 py-2 rounded-lg transition-colors whitespace-nowrap flex items-center gap-1.5 ${
+              activeTab === 'all'
                 ? 'bg-indigo-600 text-white shadow-xs'
                 : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
             }`}
           >
-            Alle Actieve Agenda's ({calendars.length})
+            <span>Overzicht ({calendars.length})</span>
           </button>
         </div>
 
         {/* Tab Content */}
-        <div className="p-6 overflow-y-auto space-y-4 text-xs flex-1">
-          {/* TAB: GOOGLE OAUTH */}
-          {activeTab === 'google' && (
+        <div className="p-5 overflow-y-auto space-y-4 text-xs flex-1">
+          {/* TAB 1: QUICK GOOGLE ICAL CONNECTOR (WORKS 100% IN PREVIEW & DOCKER) */}
+          {activeTab === 'quick_google' && (
             <div className="space-y-4">
+              <div className="p-3.5 rounded-xl bg-indigo-50/80 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800/60 flex items-start gap-3">
+                <Sparkles className="w-5 h-5 text-indigo-600 dark:text-indigo-400 shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <div className="font-bold text-slate-900 dark:text-white text-xs">
+                    Altijd werkende Google Agenda koppeling
+                  </div>
+                  <p className="text-slate-600 dark:text-slate-300 text-[11px] leading-relaxed">
+                    Deze methode werkt gegarandeerd in de <strong>AI Studio preview én in je eigen Docker setup</strong>. Er zijn geen popups of cloud-authorisaties nodig: je plakt simpelweg de geheime iCal link uit je Google Agenda.
+                  </p>
+                </div>
+              </div>
+
+              {icalSuccess && (
+                <div className="p-3 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/60 rounded-xl text-emerald-800 dark:text-emerald-200 flex items-center gap-2">
+                  <Check className="w-4 h-4 shrink-0 text-emerald-600" />
+                  <span>{icalSuccess}</span>
+                </div>
+              )}
+
+              {icalError && (
+                <div className="p-3 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/60 rounded-xl text-red-700 dark:text-red-300 flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  <span>{icalError}</span>
+                </div>
+              )}
+
+              <form onSubmit={handleAddGoogleIcal} className="space-y-3 p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
+                <div>
+                  <label className="block font-semibold mb-1 text-slate-700 dark:text-slate-300">
+                    Naam voor deze Google Agenda
+                  </label>
+                  <input
+                    type="text"
+                    value={googleCalName}
+                    onChange={e => setGoogleCalName(e.target.value)}
+                    placeholder="bijv. Google Privé Agenda, Gezinsagenda Google"
+                    className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="font-semibold text-slate-700 dark:text-slate-300">
+                      Geheime iCal URL van je Google Agenda
+                    </label>
+                    <button
+                      type="button"
+                      onClick={handleLoadSampleHolidays}
+                      className="text-[11px] text-indigo-600 dark:text-indigo-400 hover:underline font-medium"
+                    >
+                      Probeer test-agenda (NL Feestdagen)
+                    </button>
+                  </div>
+                  <input
+                    type="url"
+                    value={googleIcalUrl}
+                    onChange={e => setGoogleIcalUrl(e.target.value)}
+                    placeholder="https://calendar.google.com/calendar/ical/.../basic.ics"
+                    className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white font-mono text-[11px]"
+                    required
+                  />
+                </div>
+
+                <div className="flex items-center justify-between pt-1 flex-wrap gap-2">
+                  <div>
+                    <label className="block font-semibold mb-1 text-slate-700 dark:text-slate-300">
+                      Kleurcode
+                    </label>
+                    <div className="flex items-center gap-2">
+                      {['#4285F4', '#0F9D58', '#F4B400', '#DB4437', '#8B5CF6', '#EC4899'].map(color => (
+                        <button
+                          type="button"
+                          key={color}
+                          onClick={() => setGoogleCalColor(color)}
+                          className={`w-6 h-6 rounded-full border-2 transition-transform ${
+                            googleCalColor === color ? 'scale-110 border-slate-900 dark:border-white shadow-xs' : 'border-transparent'
+                          }`}
+                          style={{ backgroundColor: color }}
+                        />
+                      ))}
+                    </div>
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={isTestingIcal}
+                    className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-semibold rounded-lg shadow-xs transition-colors shrink-0"
+                  >
+                    {isTestingIcal ? 'Bezig met ophalen en testen...' : 'Google Agenda Nu Koppelen'}
+                  </button>
+                </div>
+              </form>
+
+              {/* Step-by-step instructions for finding secret iCal address */}
+              <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 space-y-2 text-[11px] text-slate-600 dark:text-slate-400">
+                <div className="font-bold text-slate-900 dark:text-white text-xs flex items-center gap-1.5">
+                  <Info className="w-3.5 h-3.5 text-indigo-500" />
+                  <span>Hoe vind je het geheime iCal-adres in Google Agenda? (3 klikken)</span>
+                </div>
+                <ol className="list-decimal list-inside space-y-1 pl-1">
+                  <li>Ga op je computer naar <strong>calendar.google.com</strong>.</li>
+                  <li>Beweeg links over je agenda, klik op de <strong>3 puntjes</strong> en kies <strong>Instellingen en delen</strong>.</li>
+                  <li>Scroll naar beneden naar <strong>Agenda integreren</strong> en kopieer het <strong>Geheim adres in iCal-indeling</strong>.</li>
+                  <li>Plak de link hierboven en klik op 'Google Agenda Nu Koppelen'.</li>
+                </ol>
+              </div>
+            </div>
+          )}
+
+          {/* TAB 2: GOOGLE OAUTH */}
+          {activeTab === 'oauth' && (
+            <div className="space-y-4">
+              {oauthError && (
+                <div className="p-3.5 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/60 rounded-xl space-y-2 text-amber-900 dark:text-amber-200">
+                  <div className="font-bold text-xs flex items-center gap-1.5">
+                    <AlertCircle className="w-4 h-4 shrink-0 text-amber-600" />
+                    <span>Waarom lukt inloggen in de preview niet?</span>
+                  </div>
+                  <p className="text-[11px] leading-relaxed">
+                    {oauthError}
+                  </p>
+                  <div className="pt-1">
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('quick_google')}
+                      className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-[11px] font-semibold"
+                    >
+                      Gebruik Direct Koppelen (iCal)
+                    </button>
+                  </div>
+                </div>
+              )}
+
               {!googleUser || !googleToken ? (
                 <div className="p-6 text-center rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 space-y-4">
                   <div className="w-12 h-12 mx-auto rounded-full bg-indigo-50 dark:bg-indigo-950/60 flex items-center justify-center text-indigo-600 dark:text-indigo-400">
@@ -196,20 +361,19 @@ export const ManageCalendarsModal: React.FC<ManageCalendarsModalProps> = ({
                   </div>
                   <div className="space-y-1">
                     <h4 className="text-sm font-bold text-slate-900 dark:text-white">
-                      Koppel je Google Account
+                      Inloggen met Google Account (OAuth)
                     </h4>
-                    <p className="text-slate-500 max-w-md mx-auto">
-                      Log in om direct je persoonlijke en gezamenlijke Google Agenda's in te laden en afspraken tweerichtingsverkeer te synchroniseren.
+                    <p className="text-slate-500 max-w-md mx-auto text-[11px]">
+                      Maakt rechtstreeks verbinding met de Google Calendar API voor tweerichtingssynchronisatie.
                     </p>
                   </div>
 
-                  {/* Material Design Google Sign In Button according to workspace-integration guidelines */}
                   <div className="pt-2 flex justify-center">
                     <button
                       type="button"
                       onClick={handleLogin}
                       disabled={isLoggingIn}
-                      className="inline-flex items-center gap-3 px-5 py-2.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg shadow-sm hover:shadow-md hover:bg-slate-50 dark:hover:bg-slate-700 transition-all font-semibold text-slate-700 dark:text-slate-200"
+                      className="inline-flex items-center gap-3 px-5 py-2.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg shadow-sm hover:shadow-md hover:bg-slate-50 dark:hover:bg-slate-700 transition-all font-semibold text-slate-700 dark:text-slate-200 text-xs"
                     >
                       <svg className="w-5 h-5 shrink-0" viewBox="0 0 48 48">
                         <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" />
@@ -217,13 +381,16 @@ export const ManageCalendarsModal: React.FC<ManageCalendarsModalProps> = ({
                         <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z" />
                         <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z" />
                       </svg>
-                      <span>{isLoggingIn ? 'Bezig met inloggen...' : 'Inloggen met Google'}</span>
+                      <span>{isLoggingIn ? 'Bezig met openen...' : 'Inloggen met Google'}</span>
                     </button>
                   </div>
+
+                  <p className="text-[10px] text-slate-400 max-w-sm mx-auto">
+                    Tip: Draai je de app in Docker op <code className="bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded">localhost:3000</code>? Daar is het domein standaard geautoriseerd en opent de popup zonder restricties.
+                  </p>
                 </div>
               ) : (
                 <div className="space-y-4">
-                  {/* Connected Profile Bar */}
                   <div className="p-4 rounded-xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/60 flex items-center justify-between gap-3">
                     <div className="flex items-center gap-3">
                       <div className="w-8 h-8 rounded-full bg-emerald-600 text-white flex items-center justify-center font-bold">
@@ -234,153 +401,74 @@ export const ManageCalendarsModal: React.FC<ManageCalendarsModalProps> = ({
                           {googleUser.displayName || 'Google Gebruiker'}
                         </div>
                         <div className="text-[11px] text-slate-500">
-                          {googleUser.email} · Verbonden met Google Calendar
+                          {googleUser.email} · Actief verbonden
                         </div>
                       </div>
                     </div>
 
                     <button
                       onClick={onGoogleSignOut}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/40 rounded-lg transition-colors font-medium"
+                      className="inline-flex items-center gap-1 px-3 py-1.5 text-red-600 hover:text-red-700 rounded-lg font-medium text-xs"
                     >
                       <LogOut className="w-3.5 h-3.5" />
                       <span>Uitloggen</span>
                     </button>
                   </div>
 
-                  {/* List of Available Google Calendars */}
                   <div className="space-y-2">
                     <h5 className="font-bold text-slate-700 dark:text-slate-300">
-                      Gevonden Google Agenda's in jouw account:
+                      Gevonden Google Agenda's:
                     </h5>
-                    {availableGoogleCalendars.length === 0 ? (
-                      <p className="text-slate-400">
-                        Geen extra Google agenda's gevonden of bezig met inladen...
-                      </p>
-                    ) : (
-                      availableGoogleCalendars.map(gcal => {
-                        const isAlreadyImported = calendars.some(c => c.id === gcal.id);
+                    {availableGoogleCalendars.map(gcal => {
+                      const isAlreadyImported = calendars.some(c => c.id === gcal.id);
 
-                        return (
-                          <div
-                            key={gcal.id}
-                            className="p-3 rounded-xl border border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3 bg-white dark:bg-slate-900"
-                          >
-                            <div className="flex items-center gap-2.5">
-                              <span
-                                className="w-3 h-3 rounded-full shrink-0"
-                                style={{ backgroundColor: gcal.color }}
-                              />
-                              <div>
-                                <div className="font-semibold text-slate-900 dark:text-white">
-                                  {gcal.name}
-                                </div>
-                                <div className="text-[11px] text-slate-500">
-                                  {gcal.description || 'Google Agenda'}
-                                </div>
+                      return (
+                        <div
+                          key={gcal.id}
+                          className="p-3 rounded-xl border border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3 bg-white dark:bg-slate-900"
+                        >
+                          <div className="flex items-center gap-2.5">
+                            <span
+                              className="w-3 h-3 rounded-full shrink-0"
+                              style={{ backgroundColor: gcal.color }}
+                            />
+                            <div>
+                              <div className="font-semibold text-slate-900 dark:text-white">
+                                {gcal.name}
+                              </div>
+                              <div className="text-[11px] text-slate-500">
+                                {gcal.description || 'Google Agenda'}
                               </div>
                             </div>
-
-                            {isAlreadyImported ? (
-                              <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-semibold text-xs">
-                                <Check className="w-3.5 h-3.5" />
-                                <span>Gekoppeld</span>
-                              </span>
-                            ) : (
-                              <button
-                                onClick={() => onImportGoogleCalendar(gcal)}
-                                className="px-3 py-1 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-lg transition-colors text-xs"
-                              >
-                                Toevoegen
-                              </button>
-                            )}
                           </div>
-                        );
-                      })
-                    )}
+
+                          {isAlreadyImported ? (
+                            <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-semibold text-xs">
+                              <Check className="w-3.5 h-3.5" />
+                              <span>Gekoppeld</span>
+                            </span>
+                          ) : (
+                            <button
+                              onClick={() => onImportGoogleCalendar(gcal)}
+                              className="px-3 py-1 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-lg text-xs"
+                            >
+                              Toevoegen
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               )}
             </div>
           )}
 
-          {/* TAB: ICAL FEED */}
-          {activeTab === 'ical' && (
-            <div className="space-y-4">
-              <form onSubmit={handleAddIcal} className="space-y-3 p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/40">
-                <h4 className="font-bold text-sm text-slate-900 dark:text-white">
-                  iCal / ICS Feed Toevoegen (Google, Apple, School, Sport)
-                </h4>
-                <p className="text-slate-500">
-                  Voeg een openbaar of geheim iCal-adres toe. De afspraken worden automatisch via onze server gecached en getoond.
-                </p>
-
-                {icalError && (
-                  <div className="p-3 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/60 rounded-lg text-red-700 dark:text-red-300 flex items-center gap-2">
-                    <AlertCircle className="w-4 h-4 shrink-0" />
-                    <span>{icalError}</span>
-                  </div>
-                )}
-
-                <div>
-                  <label className="block font-semibold mb-1">Naam van de agenda</label>
-                  <input
-                    type="text"
-                    value={icalName}
-                    onChange={e => setIcalName(e.target.value)}
-                    placeholder="bijv. Google Privé Lode, Schoolrooster, Voetbalclub"
-                    className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800"
-                    required
-                  />
-                </div>
-
-                <div>
-                  <label className="block font-semibold mb-1">iCal / ICS URL</label>
-                  <input
-                    type="url"
-                    value={icalUrl}
-                    onChange={e => setIcalUrl(e.target.value)}
-                    placeholder="https://calendar.google.com/calendar/ical/.../basic.ics"
-                    className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 font-mono"
-                    required
-                  />
-                </div>
-
-                <div>
-                  <label className="block font-semibold mb-1">Kleurcode</label>
-                  <div className="flex items-center gap-2">
-                    {['#3B82F6', '#10B981', '#EC4899', '#F59E0B', '#8B5CF6', '#06B6D4', '#EF4444'].map(color => (
-                      <button
-                        type="button"
-                        key={color}
-                        onClick={() => setIcalColor(color)}
-                        className={`w-6 h-6 rounded-full border-2 transition-transform ${
-                          icalColor === color ? 'scale-110 border-slate-900 dark:border-white shadow-xs' : 'border-transparent'
-                        }`}
-                        style={{ backgroundColor: color }}
-                      />
-                    ))}
-                  </div>
-                </div>
-
-                <div className="pt-2 flex justify-end">
-                  <button
-                    type="submit"
-                    disabled={isTestingIcal}
-                    className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-semibold rounded-lg shadow-xs transition-colors"
-                  >
-                    {isTestingIcal ? 'Bezig met ophalen en testen...' : 'iCal Agenda Toevoegen'}
-                  </button>
-                </div>
-              </form>
-            </div>
-          )}
-
-          {/* TAB: LOCAL & ALL ACTIVE CALENDARS */}
-          {activeTab === 'local' && (
+          {/* TAB 3: ALL ACTIVE CALENDARS */}
+          {activeTab === 'all' && (
             <div className="space-y-3">
               <h4 className="font-bold text-sm text-slate-900 dark:text-white">
-                Actieve Agenda's in HomeBoard:
+                Gekoppelde Agenda's in HomeBoard:
               </h4>
 
               <div className="space-y-2">
@@ -389,7 +477,7 @@ export const ManageCalendarsModal: React.FC<ManageCalendarsModalProps> = ({
                     key={cal.id}
                     className="p-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 flex items-center justify-between gap-3"
                   >
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-3 truncate">
                       <button
                         type="button"
                         onClick={() => onToggleVisibility(cal.id)}
@@ -404,22 +492,22 @@ export const ManageCalendarsModal: React.FC<ManageCalendarsModalProps> = ({
                         />
                       </button>
 
-                      <div>
-                        <div className="font-semibold text-slate-900 dark:text-white flex items-center gap-2">
-                          <span>{cal.name}</span>
-                          <span className="text-[10px] text-slate-400 font-mono">
-                            {cal.type === 'google_oauth' ? '(Google OAuth)' : cal.type === 'ical' ? '(iCal Feed)' : '(Lokaal)'}
+                      <div className="truncate">
+                        <div className="font-semibold text-slate-900 dark:text-white flex items-center gap-2 truncate">
+                          <span className="truncate">{cal.name}</span>
+                          <span className="text-[10px] text-slate-400 font-mono shrink-0">
+                            {cal.type === 'google_oauth' ? '(Google)' : cal.type === 'ical' ? '(iCal)' : '(Lokaal)'}
                           </span>
                         </div>
                         {cal.description && (
-                          <div className="text-[11px] text-slate-500 truncate max-w-sm">
+                          <div className="text-[11px] text-slate-500 truncate max-w-xs sm:max-w-md">
                             {cal.description}
                           </div>
                         )}
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 shrink-0">
                       <button
                         type="button"
                         onClick={() => onToggleVisibility(cal.id)}
@@ -447,7 +535,7 @@ export const ManageCalendarsModal: React.FC<ManageCalendarsModalProps> = ({
         </div>
 
         {/* Footer */}
-        <div className="px-6 py-3 border-t border-slate-100 dark:border-slate-800 flex justify-end">
+        <div className="px-5 py-3 border-t border-slate-100 dark:border-slate-800 flex justify-end">
           <button
             type="button"
             onClick={onClose}

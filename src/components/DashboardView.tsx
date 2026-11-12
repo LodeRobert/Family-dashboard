@@ -116,33 +116,33 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   return (
     <div className="space-y-6 pb-12">
       {/* Hero Family Greeting & Clock Card */}
-      <div className="bg-gradient-to-br from-indigo-900 via-slate-900 to-slate-950 text-white rounded-2xl p-6 sm:p-8 shadow-md relative overflow-hidden border border-slate-800">
-        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
-          <div className="space-y-2">
+      <div className="bg-gradient-to-br from-indigo-900 via-slate-900 to-slate-950 text-white rounded-2xl p-5 sm:p-8 shadow-md relative overflow-hidden border border-slate-800">
+        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-5 sm:gap-6">
+          <div className="space-y-1.5 sm:space-y-2">
             <div className="inline-flex items-center gap-2 text-indigo-300 text-xs font-semibold tracking-wider uppercase">
               <span className="w-2 h-2 rounded-full bg-indigo-400"></span>
               <span>{settings.dashboardName || 'Familiedashboard'}</span>
               <span aria-hidden="true">·</span>
               <span className="capitalize">{greetingPeriod}</span>
             </div>
-            <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight">
+            <h1 className="text-2xl sm:text-4xl font-extrabold tracking-tight">
               {greeting}, familie! 👋
             </h1>
-            <p className="text-slate-300 text-sm sm:text-base capitalize">
+            <p className="text-slate-300 text-xs sm:text-base capitalize">
               {formattedDate}
             </p>
           </div>
 
           {/* Time & Weather Display */}
-          <div className="flex items-center gap-6 sm:gap-8 bg-white/10 backdrop-blur-md px-5 py-4 rounded-xl border border-white/10">
+          <div className="flex items-center justify-between sm:justify-start gap-4 sm:gap-8 bg-white/10 backdrop-blur-md px-4 sm:px-5 py-3 sm:py-4 rounded-xl border border-white/10 w-full sm:w-auto">
             <div>
-              <div className="text-3xl sm:text-4xl font-bold font-mono tabular-nums tracking-tight">
+              <div className="text-2xl sm:text-4xl font-bold font-mono tabular-nums tracking-tight">
                 {formattedTime}
               </div>
-              <div className="text-xs text-slate-300 font-medium">Lokale tijd</div>
+              <div className="text-[11px] sm:text-xs text-slate-300 font-medium">Lokale tijd</div>
             </div>
 
-            <div className="h-10 w-px bg-white/15"></div>
+            <div className="h-8 sm:h-10 w-px bg-white/15"></div>
 
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-lg bg-amber-500/20 text-amber-300 flex items-center justify-center">
