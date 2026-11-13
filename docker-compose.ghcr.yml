@@ -1,0 +1,32 @@
+# ==============================================================================
+# HomeBoard - Docker Compose voor Direct Pullen vanaf GitHub (GHCR)
+# ==============================================================================
+# Gebruik dit bestand in Portainer, Synology Container Manager, Dockge of
+# Unraid als je het kant-en-klare image direct wilt pullen zonder zelf te bouwen.
+#
+# BELANGRIJK:
+# Vervang <JOUW-GITHUB-NAAM>/<REPO-NAAM> door jouw eigen GitHub gebruikersnaam
+# en repository-naam (alles in kleine letters!), bijvoorbeeld:
+#   image: ghcr.io/janjansen/homeboard:latest
+# ==============================================================================
+
+services:
+  homeboard:
+    image: ghcr.io/<JOUW-GITHUB-NAAM>/<REPO-NAAM>:latest
+    container_name: homeboard
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - DATA_DIR=/data
+      - TZ=Europe/Amsterdam
+    volumes:
+      - ./data:/data
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      start_period: 15s
+      retries: 3

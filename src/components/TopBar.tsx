@@ -4,7 +4,7 @@ import {
   LayoutDashboard,
   CalendarDays,
   Sparkles,
-  Server,
+  Settings,
   Plus,
   Maximize2,
   Minimize2,
@@ -20,7 +20,7 @@ interface TopBarProps {
   onToggleKiosk: () => void;
   isDarkMode: boolean;
   onToggleDarkMode: () => void;
-  activeCalendarCount: number;
+  dashboardName?: string;
 }
 
 export const TopBar: React.FC<TopBarProps> = ({
@@ -30,28 +30,31 @@ export const TopBar: React.FC<TopBarProps> = ({
   isKiosk,
   onToggleKiosk,
   isDarkMode,
-  onToggleDarkMode
+  onToggleDarkMode,
+  dashboardName
 }) => {
   return (
     <header className="sticky top-0 z-40 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 transition-colors">
       <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between gap-2 sm:gap-6 h-14 sm:h-16">
-          {/* Zone 1: Single text element brand wordmark */}
+          {/* Zone 1: Brand wordmark */}
           <div className="flex items-center gap-2 shrink-0">
             <button
               onClick={() => onTabChange('dashboard')}
               className="flex items-center gap-2 text-left group focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 rounded-lg p-1"
             >
               <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-gradient-to-tr from-indigo-600 to-violet-500 flex items-center justify-center text-white shadow-xs group-hover:scale-105 transition-transform">
-                <span className="text-base sm:text-lg font-bold">H</span>
+                <span className="text-base sm:text-lg font-bold">
+                  {(dashboardName || 'HomeBoard').charAt(0).toUpperCase()}
+                </span>
               </div>
-              <span className="text-lg sm:text-xl font-bold tracking-tight text-slate-900 dark:text-white whitespace-nowrap">
-                HomeBoard
+              <span className="text-lg sm:text-xl font-bold tracking-tight text-slate-900 dark:text-white whitespace-nowrap max-w-[160px] sm:max-w-[220px] truncate">
+                {dashboardName || 'HomeBoard'}
               </span>
             </button>
           </div>
 
-          {/* Zone 2: Desktop/Tablet Nav Links (Hidden on GSM / mobile screens, shown on md:) */}
+          {/* Zone 2: Desktop/Tablet Nav Links */}
           <nav className="hidden md:flex items-center gap-1 lg:gap-2">
             <button
               onClick={() => onTabChange('dashboard')}
@@ -90,19 +93,19 @@ export const TopBar: React.FC<TopBarProps> = ({
             </button>
 
             <button
-              onClick={() => onTabChange('docker')}
+              onClick={() => onTabChange('settings')}
               className={`flex items-center gap-2 px-3 lg:px-4 py-2 text-sm font-medium rounded-lg transition-colors whitespace-nowrap shrink-0 ${
-                currentTab === 'docker'
+                currentTab === 'settings'
                   ? 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 font-semibold shadow-xs'
                   : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800/60'
               }`}
             >
-              <Server className="w-4 h-4 shrink-0" />
-              <span>Docker & Setup</span>
+              <Settings className="w-4 h-4 shrink-0" />
+              <span>Instellingen</span>
             </button>
           </nav>
 
-          {/* Zone 3: Utility Controls & Primary Action (Optimized for all viewports) */}
+          {/* Zone 3: Utility Controls & Primary Action */}
           <div className="flex items-center gap-1 sm:gap-2 shrink-0">
             <button
               onClick={onToggleDarkMode}

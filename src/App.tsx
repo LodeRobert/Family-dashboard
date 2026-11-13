@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
+  AppSettings,
   AppState,
   CalendarEvent,
   CalendarSource,
   Chore,
+  FamilyMember,
   RewardItem,
   ViewTab
 } from './types';
@@ -12,13 +14,14 @@ import { BottomNavBar } from './components/BottomNavBar';
 import { DashboardView } from './components/DashboardView';
 import { CalendarView } from './components/CalendarView';
 import { ChoresView } from './components/ChoresView';
-import { DockerSetupView } from './components/DockerSetupView';
+import { SettingsView } from './components/SettingsView';
 import { EventModal } from './components/EventModal';
 import { ManageCalendarsModal } from './components/ManageCalendarsModal';
 import {
   initAuth,
   googleSignIn,
-  logoutGoogle
+  logoutGoogle,
+  GoogleAccountProfile
 } from './services/firebaseAuth';
 import {
   fetchGoogleCalendarList,
@@ -29,9 +32,9 @@ import {
 import {
   loadAppState,
   saveAppState,
-  fetchICalFeedEvents
+  fetchICalFeedEvents,
+  fetchCurrentWeather
 } from './services/storage';
-import { User } from 'firebase/auth';
 
 export default function App() {
   const [currentTab, setCurrentTab] = useState<ViewTab>('dashboard');
@@ -49,7 +52,7 @@ export default function App() {
   const [isManageCalendarsOpen, setIsManageCalendarsOpen] = useState(false);
 
   // Google Calendar Auth & Feeds state
-  const [googleUser, setGoogleUser] = useState<User | null>(null);
+  const [googleUser, setGoogleUser] = useState<GoogleAccountProfile | null>(null);
   const [googleToken, setGoogleToken] = useState<string | null>(null);
   const [availableGoogleCalendars, setAvailableGoogleCalendars] = useState<CalendarSource[]>([]);
   const [externalEvents, setExternalEvents] = useState<CalendarEvent[]>([]);
@@ -133,15 +136,57 @@ export default function App() {
     []
   );
 
+  // State Updates Helper
+  const updateStateAndPersist = useCallback(
+    async (updater: (prev: AppState) => AppState) => {
+      setAppState(prev => {
+        if (!prev) return prev;
+        const next = updater(prev);
+        saveAppState(next);
+        return next;
+      });
+    },
+    []
+  );
+
+  // Refresh live weather for configured coordinates
+  const refreshLiveWeather = useCallback(
+    async (lat?: number, lon?: number) => {
+      if (lat == null || lon == null) return;
+      try {
+        const weather = await fetchCurrentWeather(lat, lon);
+        updateStateAndPersist(prev => ({
+          ...prev,
+          settings: {
+            ...prev.settings,
+            weatherTemp: weather.temp,
+            weatherCondition: weather.condition,
+            weatherCode: weather.weatherCode
+          }
+        }));
+      } catch {
+        // Keep last cached weather if offline
+      }
+    },
+    [updateStateAndPersist]
+  );
+
   // Initialize App State and Auth
   useEffect(() => {
+    let unsubscribeAuth: (() => void) | undefined;
+
     async function init() {
       try {
         const state = await loadAppState();
         setAppState(state);
 
+        // Fetch fresh weather for saved city coordinates
+        if (state.settings.weatherLat != null && state.settings.weatherLon != null) {
+          refreshLiveWeather(state.settings.weatherLat, state.settings.weatherLon);
+        }
+
         // Init Firebase Auth
-        initAuth(
+        unsubscribeAuth = initAuth(
           async (user, token) => {
             setGoogleUser(user);
             setGoogleToken(token);
@@ -179,9 +224,13 @@ export default function App() {
     }
 
     init();
-  }, [refreshExternalCalendars]);
 
-  // Periodic refresh (every 5 minutes for wall displays)
+    return () => {
+      if (unsubscribeAuth) unsubscribeAuth();
+    };
+  }, [refreshExternalCalendars, refreshLiveWeather]);
+
+  // Periodic refresh: calendars every 5 min
   useEffect(() => {
     if (!appState) return;
     const interval = setInterval(() => {
@@ -190,9 +239,22 @@ export default function App() {
     return () => clearInterval(interval);
   }, [appState, googleToken, refreshExternalCalendars]);
 
+  // Periodic refresh: live weather every 15 min
+  useEffect(() => {
+    const lat = appState?.settings.weatherLat;
+    const lon = appState?.settings.weatherLon;
+    if (lat == null || lon == null) return;
+
+    const weatherInterval = setInterval(() => {
+      refreshLiveWeather(lat, lon);
+    }, 15 * 60 * 1000);
+
+    return () => clearInterval(weatherInterval);
+  }, [appState?.settings.weatherLat, appState?.settings.weatherLon, refreshLiveWeather]);
+
   // Google OAuth Handlers
   const handleGoogleSignIn = async () => {
-    const result = await googleSignIn();
+    const result = await googleSignIn(appState?.settings.googleClientId);
     if (result) {
       setGoogleUser(result.user);
       setGoogleToken(result.accessToken);
@@ -226,14 +288,41 @@ export default function App() {
     }
   };
 
-  // State Updates Helpers
-  const updateStateAndPersist = async (updater: (prev: AppState) => AppState) => {
-    setAppState(prev => {
-      if (!prev) return prev;
-      const next = updater(prev);
-      saveAppState(next);
-      return next;
-    });
+  // Settings & Household Handlers
+  const handleUpdateSettings = (partial: Partial<AppSettings>) => {
+    updateStateAndPersist(prev => ({
+      ...prev,
+      settings: {
+        ...prev.settings,
+        ...partial
+      }
+    }));
+  };
+
+  const handleUpdateFamilyMembers = (members: FamilyMember[]) => {
+    const validIds = new Set(members.map(m => m.id));
+    updateStateAndPersist(prev => ({
+      ...prev,
+      familyMembers: members,
+      chores: prev.chores.filter(c => validIds.has(c.memberId))
+    }));
+  };
+
+  const handleUpdateCalendars = (calendars: CalendarSource[]) => {
+    const validIds = new Set(calendars.map(c => c.id));
+    updateStateAndPersist(prev => ({
+      ...prev,
+      calendars,
+      events: prev.events.filter(e => validIds.has(e.calendarId))
+    }));
+    refreshExternalCalendars(calendars, googleToken);
+  };
+
+  const handleUpdateCalendar = (calendarId: string, patch: Partial<CalendarSource>) => {
+    updateStateAndPersist(prev => ({
+      ...prev,
+      calendars: prev.calendars.map(c => (c.id === calendarId ? { ...c, ...patch } : c))
+    }));
   };
 
   // Calendar Event Handlers
@@ -461,7 +550,7 @@ export default function App() {
           onToggleKiosk={toggleKiosk}
           isDarkMode={isDarkMode}
           onToggleDarkMode={toggleDarkMode}
-          activeCalendarCount={appState.calendars.length}
+          dashboardName={appState.settings.dashboardName}
         />
       )}
 
@@ -515,6 +604,7 @@ export default function App() {
             onOpenNewEvent={handleOpenNewEvent}
             onNavigateToCalendar={() => setCurrentTab('calendar')}
             onNavigateToChores={() => setCurrentTab('chores')}
+            onNavigateToSettings={() => setCurrentTab('settings')}
             onToggleChore={handleToggleChore}
           />
         )}
@@ -545,12 +635,17 @@ export default function App() {
           />
         )}
 
-        {currentTab === 'docker' && (
-          <DockerSetupView
+        {currentTab === 'settings' && (
+          <SettingsView
             appState={appState}
+            onUpdateSettings={handleUpdateSettings}
+            onUpdateFamilyMembers={handleUpdateFamilyMembers}
+            onUpdateCalendars={handleUpdateCalendars}
+            onOpenManageCalendars={() => setIsManageCalendarsOpen(true)}
             onRestoreState={async newState => {
               setAppState(newState);
               await saveAppState(newState);
+              refreshExternalCalendars(newState.calendars, googleToken);
             }}
           />
         )}
@@ -584,6 +679,7 @@ export default function App() {
         onClose={() => setIsManageCalendarsOpen(false)}
         calendars={appState.calendars}
         onAddCalendar={handleAddCalendar}
+        onUpdateCalendar={handleUpdateCalendar}
         onDeleteCalendar={handleDeleteCalendar}
         onToggleVisibility={handleToggleCalendarVisibility}
         onGoogleSignIn={handleGoogleSignIn}
@@ -593,6 +689,8 @@ export default function App() {
         availableGoogleCalendars={availableGoogleCalendars}
         onImportGoogleCalendar={handleAddCalendar}
         onSyncAll={handleSyncAll}
+        customGoogleClientId={appState.settings.googleClientId}
+        onNavigateToSettings={() => setCurrentTab('settings')}
       />
     </div>
   );

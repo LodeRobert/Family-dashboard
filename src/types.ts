@@ -32,7 +32,8 @@ export interface FamilyMember {
   name: string;
   role: 'parent' | 'child';
   color: string;
-  avatar: string;
+  avatar: string; // Emoji fallback
+  photoUrl?: string; // Uploaded photo path stored in /data/avatars
   stars: number;
 }
 
@@ -57,9 +58,16 @@ export interface RewardItem {
 
 export interface AppSettings {
   dashboardName: string;
+  showFamilyNameInGreeting: boolean;
+  familyGreetingName: string;
   cityName: string;
+  weatherLat?: number;
+  weatherLon?: number;
   weatherTemp: number;
   weatherCondition: string;
+  weatherCode?: number;
+  googleClientId?: string;
+  customAppUrl?: string;
   kioskAutoDim: boolean;
   kioskDimAfterMinutes: number;
   kioskTheme: 'auto' | 'light' | 'dark';
@@ -75,5 +83,14 @@ export interface AppState {
   settings: AppSettings;
 }
 
-export type ViewTab = 'dashboard' | 'calendar' | 'chores' | 'docker';
+export type ViewTab = 'dashboard' | 'calendar' | 'chores' | 'settings';
 export type CalendarViewMode = 'day' | 'week' | 'month' | 'agenda';
+
+export interface WeatherLocationResult {
+  id: number;
+  name: string;
+  country: string;
+  admin1?: string;
+  latitude: number;
+  longitude: number;
+}

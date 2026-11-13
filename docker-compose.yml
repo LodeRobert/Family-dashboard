@@ -1,5 +1,5 @@
 # ==============================================================================
-# HomeBoard - Docker Compose Configuratie
+# HomeBoard - Docker Compose Configuratie (Bouwen vanaf GitHub / lokaal)
 # ==============================================================================
 # Snel starten:
 #   docker compose up -d --build
@@ -11,8 +11,6 @@
 #   docker compose down
 # ==============================================================================
 
-version: '3.8'
-
 services:
   homeboard:
     build:
@@ -22,7 +20,7 @@ services:
     restart: unless-stopped
 
     # --------------------------------------------------------------------------
-    # POORTMAPPING (Pas de linkerkant aan als poort 3000 al bezet is)
+    # 1. POORTMAPPING (Pas de linkerkant aan als poort 3000 al bezet is)
     # Formaat: "HOST_POORT:CONTAINER_POORT"
     # Voorbeeld: "8080:3000" maakt de app bereikbaar via http://jouw-ip:8080
     # --------------------------------------------------------------------------
@@ -30,15 +28,16 @@ services:
       - "${PORT:-3000}:3000"
 
     # --------------------------------------------------------------------------
-    # OMGEVINGSVARIABELEN
+    # 2. OMGEVINGSVARIABELEN
     # --------------------------------------------------------------------------
     environment:
       - NODE_ENV=production
       - PORT=3000
       - DATA_DIR=/data
+      - TZ=Europe/Amsterdam
 
     # --------------------------------------------------------------------------
-    # PERSISTENTE DATA OPSLAG
+    # 3. PERSISTENTE DATA OPSLAG
     # Alle agenda's, taken, gezinsleden en instellingen worden bewaard in de
     # lokale map './data' op je host server. Zelfs bij het updaten van de
     # container blijft al je data 100% veilig bewaard.
@@ -47,11 +46,12 @@ services:
       - ./data:/data
 
     # --------------------------------------------------------------------------
-    # HEALTHCHECK
+    # 4. HEALTHCHECK
     # Controleert automatisch of de applicatie gezond draait
     # --------------------------------------------------------------------------
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/api/health"]
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
       interval: 30s
       timeout: 10s
+      start_period: 15s
       retries: 3

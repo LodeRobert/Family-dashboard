@@ -6,8 +6,8 @@ import {
   CalendarSource,
   AppSettings
 } from '../types';
+import { MemberAvatar } from './MemberAvatar';
 import {
-  Clock,
   Calendar as CalendarIcon,
   CheckCircle2,
   Circle,
@@ -17,7 +17,11 @@ import {
   CloudSun,
   ChevronRight,
   Sun,
-  CloudRain
+  Cloud,
+  CloudRain,
+  CloudSnow,
+  CloudLightning,
+  CloudFog
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
@@ -30,6 +34,7 @@ interface DashboardViewProps {
   onOpenNewEvent: () => void;
   onNavigateToCalendar: () => void;
   onNavigateToChores: () => void;
+  onNavigateToSettings: () => void;
   onToggleChore: (choreId: string) => void;
 }
 
@@ -42,6 +47,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onOpenNewEvent,
   onNavigateToCalendar,
   onNavigateToChores,
+  onNavigateToSettings,
   onToggleChore
 }) => {
   const [currentTime, setCurrentTime] = useState(new Date());
@@ -65,9 +71,16 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     greetingPeriod = 'nacht';
   }
 
-  // Filter events for today
-  const todayStr = currentTime.toISOString().split('T')[0];
+  const greetingLine =
+    settings.showFamilyNameInGreeting && settings.familyGreetingName?.trim()
+      ? `${greeting}, ${settings.familyGreetingName.trim()}! 👋`
+      : `${greeting}! 👋`;
+
+  // Calendar color lookup so changing a calendar color updates all its events immediately
+  const calendarMap = new Map<string, CalendarSource>(calendars.map(c => [c.id, c]));
   const visibleCalendarIds = new Set(calendars.filter(c => c.visible).map(c => c.id));
+
+  const todayStr = currentTime.toISOString().split('T')[0];
 
   const todayEvents = events
     .filter(evt => visibleCalendarIds.has(evt.calendarId))
@@ -78,7 +91,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     })
     .sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
 
-  // Filter upcoming events for the rest of the week
   const upcomingEvents = events
     .filter(evt => visibleCalendarIds.has(evt.calendarId))
     .filter(evt => {
@@ -99,7 +111,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     hour: '2-digit',
     minute: '2-digit',
     second: '2-digit',
-    hour12: false
+    hour12: !settings.timeFormat24h
   }).format(currentTime);
 
   const handleChoreClick = (chore: Chore) => {
@@ -113,6 +125,26 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     onToggleChore(chore.id);
   };
 
+  const renderWeatherIcon = () => {
+    const code = settings.weatherCode ?? 0;
+    if (code === 0 || code === 1) {
+      return hours >= 19 || hours < 6 ? (
+        <CloudSun className="w-6 h-6 text-indigo-300" />
+      ) : (
+        <Sun className="w-6 h-6 text-amber-400" />
+      );
+    }
+    if (code === 2) return <CloudSun className="w-6 h-6 text-amber-300" />;
+    if (code === 3) return <Cloud className="w-6 h-6 text-slate-300" />;
+    if (code === 45 || code === 48) return <CloudFog className="w-6 h-6 text-slate-300" />;
+    if ((code >= 51 && code <= 67) || (code >= 80 && code <= 82))
+      return <CloudRain className="w-6 h-6 text-sky-300" />;
+    if ((code >= 71 && code <= 77) || code === 85 || code === 86)
+      return <CloudSnow className="w-6 h-6 text-sky-100" />;
+    if (code >= 95) return <CloudLightning className="w-6 h-6 text-amber-300" />;
+    return <CloudSun className="w-6 h-6 text-amber-300" />;
+  };
+
   return (
     <div className="space-y-6 pb-12">
       {/* Hero Family Greeting & Clock Card */}
@@ -121,19 +153,19 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <div className="space-y-1.5 sm:space-y-2">
             <div className="inline-flex items-center gap-2 text-indigo-300 text-xs font-semibold tracking-wider uppercase">
               <span className="w-2 h-2 rounded-full bg-indigo-400"></span>
-              <span>{settings.dashboardName || 'Familiedashboard'}</span>
+              <span>{settings.dashboardName || 'HomeBoard'}</span>
               <span aria-hidden="true">·</span>
               <span className="capitalize">{greetingPeriod}</span>
             </div>
             <h1 className="text-2xl sm:text-4xl font-extrabold tracking-tight">
-              {greeting}, familie! 👋
+              {greetingLine}
             </h1>
             <p className="text-slate-300 text-xs sm:text-base capitalize">
               {formattedDate}
             </p>
           </div>
 
-          {/* Time & Weather Display */}
+          {/* Time & Live Weather Display */}
           <div className="flex items-center justify-between sm:justify-start gap-4 sm:gap-8 bg-white/10 backdrop-blur-md px-4 sm:px-5 py-3 sm:py-4 rounded-xl border border-white/10 w-full sm:w-auto">
             <div>
               <div className="text-2xl sm:text-4xl font-bold font-mono tabular-nums tracking-tight">
@@ -144,30 +176,31 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
             <div className="h-8 sm:h-10 w-px bg-white/15"></div>
 
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg bg-amber-500/20 text-amber-300 flex items-center justify-center">
-                {hours >= 19 || hours < 6 ? (
-                  <CloudSun className="w-6 h-6 text-indigo-300" />
-                ) : (
-                  <Sun className="w-6 h-6 text-amber-400" />
-                )}
+            <button
+              type="button"
+              onClick={onNavigateToSettings}
+              className="flex items-center gap-3 text-left group hover:opacity-90 transition-opacity"
+              title="Woonplaats aanpassen in Instellingen"
+            >
+              <div className="w-10 h-10 rounded-lg bg-amber-500/20 text-amber-300 flex items-center justify-center shrink-0">
+                {renderWeatherIcon()}
               </div>
               <div>
                 <div className="text-xl sm:text-2xl font-bold font-mono tabular-nums">
-                  {settings.weatherTemp || 19}°C
+                  {settings.weatherTemp ?? 18}°C
                 </div>
-                <div className="text-xs text-slate-300">
-                  {settings.cityName || 'Amsterdam'} · {settings.weatherCondition || 'Zonnig'}
+                <div className="text-xs text-slate-300 group-hover:underline">
+                  {settings.cityName || 'Amsterdam'} · {settings.weatherCondition || 'Helder'}
                 </div>
               </div>
-            </div>
+            </button>
           </div>
         </div>
       </div>
 
       {/* Main Grid: Vandaag op de planning (Left) + Gezinsleden & Taken (Right) */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* Left Column: Vandaag op de agenda (7 cols) */}
+        {/* Left Column: Vandaag op de agenda */}
         <div className="lg:col-span-7 space-y-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -208,7 +241,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   Geen afspraken gepland voor vandaag
                 </div>
                 <p className="text-xs text-slate-500 max-w-sm mx-auto">
-                  Een heerlijke rustige dag! Voeg een gezinsactiviteit toe of plan alvast vooruit.
+                  Een rustige dag! Voeg een gezinsactiviteit toe of plan alvast vooruit.
                 </p>
                 <button
                   onClick={onOpenNewEvent}
@@ -219,19 +252,25 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               </div>
             ) : (
               todayEvents.map(evt => {
+                const calSource = calendarMap.get(evt.calendarId);
+                const calColor = calSource?.color || evt.calendarColor || '#6366F1';
+                const calName = calSource?.name || evt.calendarName || 'Agenda';
                 const assignedMember = familyMembers.find(m => m.id === evt.assignedTo);
+
                 const startTimeFormatted = evt.allDay
                   ? 'Hele dag'
                   : new Intl.DateTimeFormat('nl-NL', {
                       hour: '2-digit',
-                      minute: '2-digit'
+                      minute: '2-digit',
+                      hour12: !settings.timeFormat24h
                     }).format(new Date(evt.startTime));
 
                 const endTimeFormatted = evt.allDay
                   ? ''
                   : ` - ${new Intl.DateTimeFormat('nl-NL', {
                       hour: '2-digit',
-                      minute: '2-digit'
+                      minute: '2-digit',
+                      hour12: !settings.timeFormat24h
                     }).format(new Date(evt.endTime))}`;
 
                 return (
@@ -242,7 +281,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     <div className="flex items-start gap-3.5">
                       <div
                         className="w-2.5 h-2.5 rounded-full mt-1.5 shrink-0"
-                        style={{ backgroundColor: evt.calendarColor || '#6366F1' }}
+                        style={{ backgroundColor: calColor }}
                       />
                       <div className="space-y-1">
                         <div className="flex items-center gap-2 flex-wrap">
@@ -251,15 +290,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                           </span>
                           {assignedMember && (
                             <span
-                              className="text-xs px-2 py-0.5 rounded font-medium text-white"
+                              className="inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-full font-medium text-white"
                               style={{ backgroundColor: assignedMember.color }}
                             >
-                              {assignedMember.avatar} {assignedMember.name}
-                            </span>
-                          )}
-                          {evt.isExternal && (
-                            <span className="text-[10px] text-slate-400 dark:text-slate-500 font-mono">
-                              (Google / iCal)
+                              <MemberAvatar member={assignedMember} size="xs" className="border-white/80" />
+                              <span>{assignedMember.name}</span>
                             </span>
                           )}
                         </div>
@@ -285,7 +320,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                         {endTimeFormatted}
                       </div>
                       <div className="text-[11px] text-slate-400 dark:text-slate-500">
-                        {evt.calendarName || 'Agenda'}
+                        {calName}
                       </div>
                     </div>
                   </div>
@@ -295,43 +330,47 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
 
           {/* Upcoming next days strip */}
-          <div className="pt-2">
-            <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
-              Binnenkort op de agenda
-            </h3>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-              {upcomingEvents.map(evt => {
-                const eventDate = new Intl.DateTimeFormat('nl-NL', {
-                  weekday: 'short',
-                  day: 'numeric',
-                  month: 'short'
-                }).format(new Date(evt.startTime));
+          {upcomingEvents.length > 0 && (
+            <div className="pt-2">
+              <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
+                Binnenkort op de agenda
+              </h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                {upcomingEvents.map(evt => {
+                  const calSource = calendarMap.get(evt.calendarId);
+                  const calColor = calSource?.color || evt.calendarColor || '#6366F1';
+                  const eventDate = new Intl.DateTimeFormat('nl-NL', {
+                    weekday: 'short',
+                    day: 'numeric',
+                    month: 'short'
+                  }).format(new Date(evt.startTime));
 
-                return (
-                  <div
-                    key={evt.id}
-                    className="p-3 bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-800 text-xs flex items-center justify-between gap-2"
-                  >
-                    <div className="flex items-center gap-2 truncate">
-                      <div
-                        className="w-2 h-2 rounded-full shrink-0"
-                        style={{ backgroundColor: evt.calendarColor || '#6366F1' }}
-                      />
-                      <span className="font-medium text-slate-900 dark:text-slate-100 truncate">
-                        {evt.title}
+                  return (
+                    <div
+                      key={evt.id}
+                      className="p-3 bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-800 text-xs flex items-center justify-between gap-2"
+                    >
+                      <div className="flex items-center gap-2 truncate">
+                        <div
+                          className="w-2 h-2 rounded-full shrink-0"
+                          style={{ backgroundColor: calColor }}
+                        />
+                        <span className="font-medium text-slate-900 dark:text-slate-100 truncate">
+                          {evt.title}
+                        </span>
+                      </div>
+                      <span className="text-slate-500 font-mono shrink-0 capitalize">
+                        {eventDate}
                       </span>
                     </div>
-                    <span className="text-slate-500 font-mono shrink-0 capitalize">
-                      {eventDate}
-                    </span>
-                  </div>
-                );
-              })}
+                  );
+                })}
+              </div>
             </div>
-          </div>
+          )}
         </div>
 
-        {/* Right Column: Home-Board Takenbord & Dagelijkse Routines (5 cols) */}
+        {/* Right Column: Takenbord & Gezinsleden */}
         <div className="lg:col-span-5 space-y-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -358,10 +397,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               return (
                 <div
                   key={member.id}
-                  className="p-3.5 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs flex items-center justify-between gap-3"
+                  className="p-3.5 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs flex items-center justify-between gap-2.5"
                 >
                   <div className="flex items-center gap-2.5 truncate">
-                    <div className="text-2xl">{member.avatar}</div>
+                    <MemberAvatar member={member} size="md" />
                     <div className="truncate">
                       <div className="font-semibold text-slate-900 dark:text-white text-sm truncate">
                         {member.name}
@@ -395,48 +434,54 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </div>
 
             <div className="space-y-2">
-              {chores.slice(0, 5).map(chore => {
-                const member = familyMembers.find(m => m.id === chore.memberId);
+              {chores.length === 0 ? (
+                <p className="text-xs text-slate-400 text-center py-4">
+                  Nog geen taken aangemaakt. Voeg taken toe op het Takenbord.
+                </p>
+              ) : (
+                chores.slice(0, 5).map(chore => {
+                  const member = familyMembers.find(m => m.id === chore.memberId);
 
-                return (
-                  <button
-                    key={chore.id}
-                    onClick={() => handleChoreClick(chore)}
-                    className={`w-full p-2.5 rounded-lg border text-left flex items-center justify-between gap-3 transition-all ${
-                      chore.completedToday
-                        ? 'bg-emerald-50/60 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800/50 text-emerald-900 dark:text-emerald-200'
-                        : 'bg-slate-50/80 dark:bg-slate-800/40 border-slate-200 dark:border-slate-700/60 text-slate-800 dark:text-slate-200 hover:border-indigo-300'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2.5 truncate">
-                      {chore.completedToday ? (
-                        <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
-                      ) : (
-                        <Circle className="w-4 h-4 text-slate-400 shrink-0" />
-                      )}
-                      <span className="text-base shrink-0">{chore.icon || '📌'}</span>
-                      <span
-                        className={`text-xs font-medium truncate ${
-                          chore.completedToday ? 'line-through text-emerald-700/70 dark:text-emerald-300/70' : ''
-                        }`}
-                      >
-                        {chore.title}
-                      </span>
-                    </div>
-
-                    <div className="flex items-center gap-1.5 shrink-0 text-xs">
-                      {member && (
-                        <span className="text-[10px] text-slate-500 font-medium hidden sm:inline">
-                          {member.name}
+                  return (
+                    <button
+                      key={chore.id}
+                      onClick={() => handleChoreClick(chore)}
+                      className={`w-full p-2.5 rounded-lg border text-left flex items-center justify-between gap-3 transition-all ${
+                        chore.completedToday
+                          ? 'bg-emerald-50/60 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800/50 text-emerald-900 dark:text-emerald-200'
+                          : 'bg-slate-50/80 dark:bg-slate-800/40 border-slate-200 dark:border-slate-700/60 text-slate-800 dark:text-slate-200 hover:border-indigo-300'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5 truncate">
+                        {chore.completedToday ? (
+                          <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                        ) : (
+                          <Circle className="w-4 h-4 text-slate-400 shrink-0" />
+                        )}
+                        <span className="text-base shrink-0">{chore.icon || '📌'}</span>
+                        <span
+                          className={`text-xs font-medium truncate ${
+                            chore.completedToday ? 'line-through text-emerald-700/70 dark:text-emerald-300/70' : ''
+                          }`}
+                        >
+                          {chore.title}
                         </span>
-                      )}
-                      <span className="text-amber-500 font-semibold font-mono tabular-nums">
-                        +{chore.stars}★
-                      </span>
-                    </div>
-                  </button>
-                );
-              })}
+                      </div>
+
+                      <div className="flex items-center gap-1.5 shrink-0 text-xs">
+                        {member && (
+                          <span className="text-[10px] text-slate-500 font-medium hidden sm:inline">
+                            {member.name}
+                          </span>
+                        )}
+                        <span className="text-amber-500 font-semibold font-mono tabular-nums">
+                          +{chore.stars}★
+                        </span>
+                      </div>
+                    </button>
+                  );
+                })
+              )}
             </div>
           </div>
         </div>

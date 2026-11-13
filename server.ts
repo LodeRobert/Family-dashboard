@@ -10,12 +10,16 @@ const app = express();
 const PORT = parseInt(process.env.PORT || '3000', 10);
 const isProduction = process.env.NODE_ENV === 'production';
 
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({ limit: '15mb' }));
 
-// Ensure persistent data directory exists
+// Ensure persistent data and avatars directories exist
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
+const AVATARS_DIR = path.join(DATA_DIR, 'avatars');
 if (!fs.existsSync(DATA_DIR)) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
+}
+if (!fs.existsSync(AVATARS_DIR)) {
+  fs.mkdirSync(AVATARS_DIR, { recursive: true });
 }
 const DATA_FILE = path.join(DATA_DIR, 'homeboard-data.json');
 
@@ -151,13 +155,20 @@ const DEFAULT_INITIAL_STATE = {
     { id: 'rew-3', title: 'Middagje speeltuin of bioscoop 🍿', starsRequired: 35, claimedCount: 0 }
   ],
   settings: {
-    dashboardName: 'HomeBoard Familie',
+    dashboardName: 'HomeBoard',
+    showFamilyNameInGreeting: true,
+    familyGreetingName: 'familie',
     cityName: 'Amsterdam',
+    weatherLat: 52.3676,
+    weatherLon: 4.9041,
     weatherTemp: 18,
     weatherCondition: 'Zonnig',
+    weatherCode: 0,
+    googleClientId: '',
+    customAppUrl: '',
     kioskAutoDim: false,
     kioskDimAfterMinutes: 10,
-    kioskTheme: 'auto', // 'light' | 'dark' | 'auto'
+    kioskTheme: 'auto',
     timeFormat24h: true
   }
 };
@@ -167,20 +178,39 @@ if (!fs.existsSync(DATA_FILE)) {
   fs.writeFileSync(DATA_FILE, JSON.stringify(DEFAULT_INITIAL_STATE, null, 2), 'utf-8');
 }
 
-// Helper to read data
 function getStoredData() {
   try {
     const raw = fs.readFileSync(DATA_FILE, 'utf-8');
-    return JSON.parse(raw);
+    const parsed = JSON.parse(raw);
+    return {
+      ...DEFAULT_INITIAL_STATE,
+      ...parsed,
+      settings: {
+        ...DEFAULT_INITIAL_STATE.settings,
+        ...(parsed.settings || {})
+      }
+    };
   } catch (err) {
     console.error('Error reading data file, falling back to initial:', err);
     return DEFAULT_INITIAL_STATE;
   }
 }
 
-// Helper to save data
 function saveStoredData(data: any) {
   fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2), 'utf-8');
+}
+
+function translateWeatherCode(code: number): string {
+  if (code === 0) return 'Helder';
+  if (code === 1) return 'Overwegend helder';
+  if (code === 2) return 'Licht bewolkt';
+  if (code === 3) return 'Bewolkt';
+  if (code === 45 || code === 48) return 'Mist';
+  if (code >= 51 && code <= 57) return 'Motregen';
+  if ((code >= 61 && code <= 67) || (code >= 80 && code <= 82)) return 'Regen';
+  if ((code >= 71 && code <= 77) || code === 85 || code === 86) return 'Sneeuw';
+  if (code >= 95) return 'Onweer';
+  return 'Wisselend';
 }
 
 // --- API ROUTES ---
@@ -213,6 +243,129 @@ app.post('/api/storage/state', (req: Request, res: Response) => {
     res.json({ success: true, timestamp: new Date().toISOString() });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
+  }
+});
+
+// Upload member avatar photo to persistent /data/avatars folder
+app.post('/api/avatars', (req: Request, res: Response) => {
+  try {
+    const { memberId, imageDataUrl } = req.body;
+    if (!memberId || typeof imageDataUrl !== 'string') {
+      return res.status(400).json({ error: 'memberId en imageDataUrl zijn verplicht' });
+    }
+
+    const match = imageDataUrl.match(/^data:image\/(png|jpeg|jpg|webp|gif);base64,(.+)$/i);
+    if (!match) {
+      return res.status(400).json({ error: 'Ongeldig afbeeldingsformaat' });
+    }
+
+    const ext = match[1].toLowerCase() === 'jpeg' ? 'jpg' : match[1].toLowerCase();
+    const base64Data = match[2];
+    const buffer = Buffer.from(base64Data, 'base64');
+
+    if (buffer.length > 5 * 1024 * 1024) {
+      return res.status(400).json({ error: 'Afbeelding is te groot (max 5MB)' });
+    }
+
+    const safeMemberId = String(memberId).replace(/[^a-zA-Z0-9_-]/g, '');
+
+    // Remove previous avatar files for this member to keep /data/avatars clean
+    try {
+      const existing = fs.readdirSync(AVATARS_DIR);
+      for (const file of existing) {
+        if (file.startsWith(`${safeMemberId}-`)) {
+          fs.unlinkSync(path.join(AVATARS_DIR, file));
+        }
+      }
+    } catch {
+      // ignore cleanup error
+    }
+
+    const filename = `${safeMemberId}-${Date.now()}.${ext}`;
+    const targetPath = path.join(AVATARS_DIR, filename);
+    fs.writeFileSync(targetPath, buffer);
+
+    res.json({
+      success: true,
+      photoUrl: `/api/avatars/${filename}`
+    });
+  } catch (error: any) {
+    console.error('Avatar upload error:', error);
+    res.status(500).json({ error: error.message || 'Kon foto niet opslaan' });
+  }
+});
+
+// Serve uploaded member avatar photos
+app.get('/api/avatars/:filename', (req: Request, res: Response) => {
+  const filename = path.basename(req.params.filename);
+  const filePath = path.join(AVATARS_DIR, filename);
+
+  if (!fs.existsSync(filePath)) {
+    return res.status(404).json({ error: 'Foto niet gevonden' });
+  }
+
+  res.setHeader('Cache-Control', 'public, max-age=31536000');
+  res.sendFile(filePath);
+});
+
+// Open-Meteo Geocoding Search (free, no API key required)
+app.get('/api/weather/search', async (req: Request, res: Response) => {
+  const query = (req.query.q as string || '').trim();
+  if (!query || query.length < 2) {
+    return res.json({ results: [] });
+  }
+
+  try {
+    const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(query)}&count=8&language=nl&format=json`;
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`Geocoding status ${response.status}`);
+    }
+    const data = await response.json();
+    const results = (data.results || []).map((item: any) => ({
+      id: item.id,
+      name: item.name,
+      country: item.country || '',
+      admin1: item.admin1 || '',
+      latitude: item.latitude,
+      longitude: item.longitude
+    }));
+
+    res.json({ results });
+  } catch (error: any) {
+    console.error('Weather search error:', error);
+    res.status(500).json({ error: 'Kon plaatsnamen niet ophalen' });
+  }
+});
+
+// Open-Meteo Current Weather (free, no API key required)
+app.get('/api/weather/current', async (req: Request, res: Response) => {
+  const lat = parseFloat(req.query.lat as string);
+  const lon = parseFloat(req.query.lon as string);
+
+  if (Number.isNaN(lat) || Number.isNaN(lon)) {
+    return res.status(400).json({ error: 'Ongeldige coördinaten' });
+  }
+
+  try {
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,weather_code&timezone=auto`;
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`Weather API status ${response.status}`);
+    }
+    const data = await response.json();
+    const temp = Math.round(data.current?.temperature_2m ?? 18);
+    const weatherCode = Number(data.current?.weather_code ?? 0);
+    const condition = translateWeatherCode(weatherCode);
+
+    res.json({
+      temp,
+      weatherCode,
+      condition
+    });
+  } catch (error: any) {
+    console.error('Weather current error:', error);
+    res.status(500).json({ error: 'Kon actueel weer niet ophalen' });
   }
 });
 
@@ -262,14 +415,12 @@ function parseICS(icsText: string, calendarId: string, calendarName: string, cal
       const val = parts[1];
       if (val) {
         if (val.length === 8) {
-          // All day event: YYYYMMDD
           const y = val.substring(0, 4);
           const m = val.substring(4, 6);
           const d = val.substring(6, 8);
           curEvent.startTime = `${y}-${m}-${d}T00:00:00.000Z`;
           curEvent.allDay = true;
         } else {
-          // DateTime: YYYYMMDDTHHmmssZ
           curEvent.startTime = formatICSDate(val);
           curEvent.allDay = false;
         }
@@ -302,7 +453,6 @@ function formatICSDate(val: string): string {
     const h = clean.substring(9, 11) || '00';
     const min = clean.substring(11, 13) || '00';
     const s = clean.substring(13, 15) || '00';
-    const isUtc = clean.endsWith('Z');
     return new Date(Date.UTC(+y, +m - 1, +d, +h, +min, +s)).toISOString();
   } catch {
     return new Date().toISOString();
@@ -321,7 +471,6 @@ app.get('/api/ical/fetch', async (req: Request, res: Response) => {
   }
 
   try {
-    // Normalise webcal:// to https://
     const normalizedUrl = url.replace(/^webcal:\/\//i, 'https://');
     const response = await fetch(normalizedUrl, {
       headers: {
@@ -347,83 +496,6 @@ app.get('/api/ical/fetch', async (req: Request, res: Response) => {
       error: 'Kan iCal agenda niet ophalen: ' + error.message
     });
   }
-});
-
-// Docker Compose export details
-app.get('/api/docker/config', (_req: Request, res: Response) => {
-  const composeYaml = `version: '3.8'
-
-services:
-  homeboard:
-    build: .
-    container_name: homeboard
-    restart: unless-stopped
-    ports:
-      - "\${PORT:-3000}:3000"
-    environment:
-      - NODE_ENV=production
-      - PORT=3000
-      - DATA_DIR=/data
-    volumes:
-      - ./data:/data
-    healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/api/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-`;
-
-  const dockerfile = `FROM node:20-alpine AS builder
-
-WORKDIR /app
-COPY package*.json ./
-RUN npm install
-
-COPY . .
-RUN npm run build
-
-FROM node:20-alpine AS runner
-WORKDIR /app
-
-ENV NODE_ENV=production
-ENV PORT=3000
-ENV DATA_DIR=/data
-
-COPY package*.json ./
-RUN npm install --omit=dev
-
-COPY --from=builder /app/dist ./dist
-COPY server.ts ./
-COPY firebase-applet-config.json ./
-
-# Install tsx for running server.ts directly
-RUN npm install -g tsx
-
-RUN mkdir -p /data
-VOLUME ["/data"]
-
-EXPOSE 3000
-
-CMD ["tsx", "server.ts"]
-`;
-
-  const envExample = `# HomeBoard Docker Configuratie
-PORT=3000
-NODE_ENV=production
-DATA_DIR=/data
-`;
-
-  res.json({
-    composeYaml,
-    dockerfile,
-    envExample,
-    instructions: [
-      '1. Maak een map aan op je server/NAS: mkdir -p homeboard/data',
-      '2. Plaats de docker-compose.yml en Dockerfile in deze map',
-      '3. Start de container met: docker compose up -d --build',
-      '4. Open http://jouw-nas-ip:3000 in de browser van je wandtablet of pc!'
-    ]
-  });
 });
 
 // --- CLIENT SERVING ---

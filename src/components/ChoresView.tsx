@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Chore, FamilyMember, RewardItem, ChorePeriod } from '../types';
+import { MemberAvatar } from './MemberAvatar';
 import {
   Sparkles,
   Plus,
@@ -53,6 +54,18 @@ export const ChoresView: React.FC<ChoresViewProps> = ({
   // New reward form state
   const [newRewardTitle, setNewRewardTitle] = useState('');
   const [newRewardStars, setNewRewardStars] = useState(10);
+
+  useEffect(() => {
+    if (familyMembers.length === 0) {
+      setSelectedMemberId('');
+      return;
+    }
+    if (!familyMembers.some(m => m.id === selectedMemberId)) {
+      const nextDefault =
+        familyMembers.find(m => m.role === 'child')?.id || familyMembers[0].id;
+      setSelectedMemberId(nextDefault);
+    }
+  }, [familyMembers, selectedMemberId]);
 
   const selectedMember = familyMembers.find(m => m.id === selectedMemberId);
   const memberChores = chores.filter(c => c.memberId === selectedMemberId);
@@ -132,7 +145,7 @@ export const ChoresView: React.FC<ChoresViewProps> = ({
                     : 'bg-slate-50 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700/80 hover:bg-slate-100 dark:hover:bg-slate-800'
                 }`}
               >
-                <span className="text-2xl">{member.avatar}</span>
+                <MemberAvatar member={member} size="md" />
                 <div>
                   <div className="text-xs font-bold text-slate-900 dark:text-white leading-tight">
                     {member.name}
@@ -172,7 +185,7 @@ export const ChoresView: React.FC<ChoresViewProps> = ({
       {selectedMember && (
         <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-4 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="flex items-center gap-3">
-            <span className="text-3xl">{selectedMember.avatar}</span>
+            <MemberAvatar member={selectedMember} size="lg" />
             <div>
               <h3 className="text-base font-bold text-slate-900 dark:text-white">
                 Takenbord van {selectedMember.name}

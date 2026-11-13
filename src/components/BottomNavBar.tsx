@@ -4,7 +4,7 @@ import {
   LayoutDashboard,
   CalendarDays,
   Sparkles,
-  Server
+  Settings
 } from 'lucide-react';
 
 interface BottomNavBarProps {
@@ -20,7 +20,7 @@ export const BottomNavBar: React.FC<BottomNavBarProps> = ({
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'calendar', label: 'Kalender', icon: CalendarDays },
     { id: 'chores', label: 'Taken', icon: Sparkles },
-    { id: 'docker', label: 'Docker', icon: Server }
+    { id: 'settings', label: 'Instellingen', icon: Settings }
   ];
 
   return (

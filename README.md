@@ -8,106 +8,83 @@
 
 - 📅 **Interactieve Kalender (Google Agenda & Feeds)**:
   - Bekijk al je gezins- en werkagenda's in **Dag-**, **Week-**, **Maand-** en **Agendalijst-weergave**.
-  - **Google Agenda koppelen via iCal**: Koppel direct via het geheime iCal-adres van Google Agenda — werkt binnen 1 minuut zonder ingewikkelde cloud-accounts!
-  - **Google OAuth ondersteuning**: Mogelijkheid tot direct inloggen met Google.
+  - **Volledig kleurenspectrum**: Kies voor elke lokale, Google- of iCal-agenda een eigen kleur uit het volledige kleurenspectrum en voeg onbeperkt lokale agenda's toe.
+  - **Google Agenda koppelen via iCal**: Koppel direct via het geheime iCal-adres van Google Agenda — werkt binnen 1 minuut op elk lokaal IP-adres.
+  - **Eigen Google OAuth Client ID**: Vul in **Instellingen** je eigen Google Cloud OAuth Client ID in om direct met je Google-account in te loggen op jouw eigen thuisadres/domein.
   - **Afspraken toevoegen & bewerken**: Voeg eenvoudig afspraken toe met titel, datum, tijden, gekoppeld gezinslid, locatie en beschrijving.
-- ⭐ **Takenbord & Beloningssysteem (Home-Board Stijl)**:
-  - Profielen voor elk gezinslid met eigen avatars, rollen en herkenbare kleuren.
-  - Dagelijkse routines verdeeld over **Ochtend**, **Middag** en **Avond**.
-  - Confetti-animatie bij het afvinken van taken en automatisch sterren sparen.
-  - **Beloningenwinkel**: Wissel verdiende sterren in voor leuke beloningen (bijv. schermtijd, pannenkoeken eten, filmavond).
-- 🕒 **Live Klok & Weerwidget**:
-  - Grote, rustige klok met datum en dagdeelbegroeting (*Goedemorgen / Goedemiddag / Goedenavond*).
-  - Actuele weersvoorspelling en temperatuur.
+- ⭐ **Takenbord & Aanpasbaar Gezin (Home-Board Stijl)**:
+  - Stel in **Instellingen** je eigen gezin samen: gezinsleden toevoegen, bewerken of verwijderen met rol (Ouder/Kind), eigen kleur en **eigen profielfoto** (lokaal opgeslagen in `data/avatars/`).
+  - Dagelijkse routines verdeeld over **Ochtend**, **Middag** en **Avond** met confetti-animatie en **Beloningenwinkel**.
+- 🕒 **Aanpasbare Begroeting, Live Klok & Lokaal Weer**:
+  - Kies in **Instellingen** zelf de naam van je bord en of je wel of geen familienaam/huishoudnaam in de begroeting toont.
+  - Kies je eigen **woonplaats** voor automatisch live weer (via Open-Meteo, zonder API-key).
 - 📱 **Volledig Responsief Ontwerp**:
   - **GSM (Mobiel)**: Vaste navigatiebalk onderaan het scherm (zoals een native app) en een compacte bovenbalk.
   - **Wandtablet**: 2-koloms dashboard met handige **Kiosk-modus** (schermvullend zonder adresbalken).
-  - **Laptop / Desktop**: Rijk breedbeeld overzicht.
-  - **Lichte & Donkere Modus**: Ideaal voor overdag én een rustige nachtmodus aan de muur.
+  - **Laptop / Desktop**: Rijk breedbeeld overzicht in **Lichte & Donkere Modus**.
 - 🔒 **100% Privacy & Zelf-Gehost**:
-  - Geen maandelijks abonnement, geen tracking, geen externe servers vereist.
-  - Alle gegevens worden lokaal opgeslagen in een persistent JSON-bestand (`./data/homeboard-data.json`).
+  - Geen maandelijks abonnement, geen tracking, geen externe cloud-opslag vereist.
+  - Alle gegevens en geüploade profielfoto's worden lokaal opgeslagen in de Docker data-map (`./data/homeboard-data.json` en `./data/avatars/`).
 
 ---
 
-## 🚀 Snel Starten met Docker Compose
+## 🚀 Starten in Docker (2 Manieren)
 
-### 1. Repository downloaden of clonen
-```bash
-git clone https://github.com/<jouw-gebruikersnaam>/homeboard.git
-cd homeboard
-```
+### Optie A: Rechtstreeks bouwen vanaf GitHub (`docker-compose.yml`)
+Geschikt voor **Docker CLI**, **Portainer (Stacks -> Repository)**, **Dockge** en **Synology / Unraid**.
 
-### 2. Container bouwen en starten
 ```bash
+git clone https://github.com/<jouw-gebruikersnaam>/<jouw-repo>.git
+cd <jouw-repo>
 docker compose up -d --build
 ```
+*In Portainer: ga naar **Stacks -> Add stack -> Repository**, vul de GitHub URL in en klik op **Deploy the stack**.*
 
-### 3. Openen in je browser
-Open op je computer, tablet of smartphone:
+---
+
+### Optie B: Direct een kant-en-klaar image pullen vanaf GitHub (GHCR)
+Deze repository bevat een automatische **GitHub Action** (`.github/workflows/docker-publish.yml`). Bij elke push naar `main` bouwt GitHub automatisch een multi-platform Docker image (`amd64` én `arm64` voor Raspberry Pi) op:
+`ghcr.io/<jouw-gebruikersnaam>/<jouw-repo>:latest`
+
+1. Push de code naar GitHub (tabblad **Actions** op GitHub bouwt nu automatisch het image).
+2. Zet het package op GitHub op **Public** (eenmalig):
+   - Ga op GitHub naar je profiel -> **Packages** -> klik op je package -> **Package settings** -> **Change visibility** -> **Public**.
+3. Gebruik `docker-compose.ghcr.yml` (of plak dit in Portainer / Synology Container Manager):
+
+```yaml
+services:
+  homeboard:
+    image: ghcr.io/<jouw-gebruikersnaam>/<jouw-repo>:latest
+    container_name: homeboard
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - DATA_DIR=/data
+      - TZ=Europe/Amsterdam
+    volumes:
+      - ./data:/data
 ```
-http://localhost:3000
+Start met:
+```bash
+docker compose -f docker-compose.ghcr.yml up -d
 ```
-*(of vervang `localhost` door het IP-adres van je NAS of server, bijv. `http://192.168.1.100:3000`)*
+
+Open daarna in je browser:
+`http://localhost:3000` *(of `http://<IP-VAN-JE-SERVER>:3000`)*
 
 ---
 
 ## ⚙️ Wat is er aan te passen in `docker-compose.yml`?
 
-Hieronder staat het complete `docker-compose.yml` bestand met uitleg per instelling:
-
-```yaml
-version: '3.8'
-
-services:
-  homeboard:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: homeboard
-    restart: unless-stopped
-
-    # 1. POORT AANPASSEN:
-    # Als poort 3000 al bezet is op je server, wijzig dan het linker getal.
-    # Bijvoorbeeld: "8080:3000" maakt de app bereikbaar op http://jouw-ip:8080
-    ports:
-      - "3000:3000"
-
-    # 2. OMGEVINGSVARIABELEN:
-    environment:
-      - NODE_ENV=production
-      - PORT=3000
-      - DATA_DIR=/data
-
-    # 3. DATA BEWAREN (PERSISTENTIE):
-    # './data' is de map op je computer/NAS waar alle afspraken, taken en
-    # gezinsleden worden opgeslagen. Dit blijft bewaard bij container updates.
-    volumes:
-      - ./data:/data
-
-    # 4. HEALTHCHECK:
-    # Controleert automatisch of de interne server goed reageert.
-    healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/api/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-```
-
-### Belangrijkste aanpassingen voor jouw situatie:
-1. **Andere poort gebruiken**:
-   Wijzig in `docker-compose.yml` de regel `ports`:
-   ```yaml
-   ports:
-     - "8085:3000"
-   ```
-   Nu is de app bereikbaar via poort `8085`.
-2. **Eigen opslagpad kiezen (bijv. op Synology NAS of Unraid)**:
-   In plaats van `./data:/data` kun je een absoluut pad opgeven:
-   ```yaml
-   volumes:
-     - /volume1/docker/homeboard/data:/data
-   ```
+| Instelling | Standaardwaarde | Wat aanpassen & Waarom? |
+| :--- | :--- | :--- |
+| **Poort (`ports`)** | `"3000:3000"` | Als poort 3000 al bezet is op je NAS of Raspberry Pi, verander je het eerste getal (bijv. `"8085:3000"`). |
+| **Opslagpad (`volumes`)** | `./data:/data` | Bewaart alle data lokaal. Op een Synology NAS of Unraid kun je een vast pad opgeven (bijv. `/volume1/docker/homeboard/data:/data`). |
+| **Tijdzone (`TZ`)** | `Europe/Amsterdam` | Pas aan indien je in een andere tijdzone zit (bijv. `Europe/Brussels`). |
+| **Herstartbeleid (`restart`)** | `unless-stopped` | Zorgt dat HomeBoard automatisch weer opstart na het herstarten van je server of NAS. |
 
 ---
 
@@ -126,67 +103,22 @@ Dit is de snelste methode en werkt gegarandeerd in elke Docker omgeving zonder d
 7. Al je afspraken worden direct binnengehaald en automatisch bijgewerkt!
 
 ### Methode 2: Direct inloggen met Google (OAuth)
-Wil je via OAuth inloggen om direct tweerichtingsverkeer te synchroniseren?
-- Draai je HomeBoard lokaal in Docker op `http://localhost:3000`? Dan is `localhost` al standaard geautoriseerd en kun je direct op **Inloggen met Google** klikken.
-- Gebruik je een eigen domeinnaam (bijv. `https://agenda.mijnhuis.nl`)? Maak in de gratis Google Cloud Console een OAuth Client ID aan en voeg je domein toe aan de geautoriseerde redirect URI's.
+- Ga in HomeBoard naar **Instellingen** → **Agenda's, Kleuren & Google OAuth**.
+- Maak in [Google Cloud Console](https://console.cloud.google.com/apis/credentials) een **OAuth 2.0 Client ID (Webapplicatie)** aan met de **Google Calendar API** ingeschakeld.
+- Voeg jouw eigen HomeBoard-adres toe onder **Geautoriseerde JavaScript-oorsprongen** (bijv. `http://localhost:3000` of `https://agenda.mijndomein.nl` — let op dat Google voor OAuth geen losse IP-adressen zoals `192.168.x.x` accepteert, wel `localhost`, een domeinnaam of `*.sslip.io`).
+- Plak je Client ID in **Instellingen** en log in via **Koppelingen** → **Inloggen met Google (OAuth)**.
 
 ---
 
 ## 📱 Handige Kioskmodus voor Wandtablets (iPad / Android / Raspberry Pi)
 
-Wil je HomeBoard gebruiken als vast scherm aan de muur in de keuken of gang?
-
-1. **iPad / iOS**:
-   - Open HomeBoard in Safari op je tablet.
-   - Tik op het **Deel-icoon** (vierkantje met pijl omhoog) en kies **Zet op beginscherm**.
-   - Start HomeBoard vanaf je beginscherm: de Safari-knoppenbalk verdwijnt en de app opent schermvullend!
-   - *Tip:* Gebruik iOS **Begeleide Toegang** (Guided Access) om te voorkomen dat iemand de app per ongeluk afsluit.
-2. **Android Tablet**:
-   - Open HomeBoard in Chrome.
-   - Tik op de 3 puntjes rechtsboven en kies **Toevoegen aan startscherm** of **App installeren**.
-   - *Tip:* Installeer de app **Fully Kiosk Browser** voor geavanceerde wandfunctionaliteiten (zoals automatisch aanzetten bij beweging via de camera).
-3. **Kiosk-knop in de app**:
-   - Klik rechtsboven op het pictogram **Kiosk** (of druk op F11) om de ingebouwde schermvullende modus te activeren.
-
----
-
-## 📤 Hoe push je dit project naar je eigen GitHub?
-
-Volg deze eenvoudige stappen in je terminal:
-
-```bash
-# 1. Initialiseer git (indien nog niet gedaan)
-git init
-
-# 2. Voeg alle bestanden toe
-git add .
-
-# 3. Maak je eerste commit
-git commit -m "feat: initial commit van HomeBoard gezinsplanner"
-
-# 4. Zet de hoofdtak op 'main'
-git branch -M main
-
-# 5. Koppel je GitHub repository (vervang door jouw GitHub URL)
-git remote add origin https://github.com/<jouw-gebruikersnaam>/homeboard.git
-
-# 6. Push naar GitHub
-git push -u origin main
-```
+1. **iPad / iOS**: Open HomeBoard in Safari -> **Deel-icoon** -> **Zet op beginscherm**.
+2. **Android Tablet**: Open HomeBoard in Chrome -> **3 puntjes** -> **Toevoegen aan startscherm** (of gebruik **Fully Kiosk Browser**).
+3. **Kiosk-knop in de app**: Klik rechtsboven op het **Kiosk-icoon** voor schermvullende weergave.
 
 ---
 
 ## 💾 Back-up & Herstel
 
-- **Automatische opslag**: Alle wijzigingen in taken, beloningen en gekoppelde agenda's worden direct weggeschreven naar `data/homeboard-data.json`.
-- **Handmatige export**: Ga in HomeBoard naar het tabblad **Docker & Setup** en klik op **Download Backup (.json)** om een momentopname te downloaden.
-- **Herstellen**: Klik op **Backup herstellen** om een eerder gedownload `.json` bestand direct terug te zetten.
-
----
-
-## 🛠️ Technologieën
-
-- **Frontend**: React 19, TypeScript, Tailwind CSS v4, Lucide Icons, Canvas Confetti.
-- **Backend**: Node.js 20, Express, Native Fetch, veilige iCal parser proxy.
-- **Container**: Multi-stage Alpine Linux Docker build.
-- **Licentie**: Open source (MIT).
+- **Automatische opslag**: Alle wijzigingen worden opgeslagen in `data/homeboard-data.json` en profielfoto's in `data/avatars/`.
+- **Handmatige export/herstel**: Gebruik de knoppen onderaan in **Instellingen** (*Tijdweergave & Gegevensback-up*).

@@ -5,6 +5,7 @@ import {
   CalendarViewMode,
   FamilyMember
 } from '../types';
+import { MemberAvatar } from './MemberAvatar';
 import {
   ChevronLeft,
   ChevronRight,
@@ -40,7 +41,8 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
   const [currentDate, setCurrentDate] = useState(new Date());
   const [viewMode, setViewMode] = useState<CalendarViewMode>('month');
 
-  // Filter events by visible calendars
+  // Filter events by visible calendars and resolve live calendar metadata
+  const calendarMap = new Map<string, CalendarSource>(calendars.map(c => [c.id, c]));
   const visibleCalendarIds = new Set(calendars.filter(c => c.visible).map(c => c.id));
   const activeEvents = events.filter(e => visibleCalendarIds.has(e.calendarId));
 
@@ -332,20 +334,24 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
 
                   {/* Day Events */}
                   <div className="space-y-1 overflow-hidden">
-                    {dayEvents.slice(0, 3).map(evt => (
-                      <div
-                        key={evt.id}
-                        onClick={e => {
-                          e.stopPropagation();
-                          onSelectEvent(evt);
-                        }}
-                        style={{ borderLeftColor: evt.calendarColor || '#6366F1' }}
-                        className="px-1.5 py-0.5 rounded text-[11px] font-medium truncate border-l-2 bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors shadow-2xs"
-                        title={evt.title}
-                      >
-                        {evt.title}
-                      </div>
-                    ))}
+                    {dayEvents.slice(0, 3).map(evt => {
+                      const liveColor =
+                        calendarMap.get(evt.calendarId)?.color || evt.calendarColor || '#6366F1';
+                      return (
+                        <div
+                          key={evt.id}
+                          onClick={e => {
+                            e.stopPropagation();
+                            onSelectEvent(evt);
+                          }}
+                          style={{ borderLeftColor: liveColor }}
+                          className="px-1.5 py-0.5 rounded text-[11px] font-medium truncate border-l-2 bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors shadow-2xs"
+                          title={evt.title}
+                        >
+                          {evt.title}
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               );
@@ -399,6 +405,9 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                           minute: '2-digit'
                         }).format(new Date(evt.startTime));
 
+                    const liveColor =
+                      calendarMap.get(evt.calendarId)?.color || evt.calendarColor || '#6366F1';
+
                     return (
                       <div
                         key={evt.id}
@@ -406,7 +415,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                           e.stopPropagation();
                           onSelectEvent(evt);
                         }}
-                        style={{ borderLeftColor: evt.calendarColor || '#6366F1' }}
+                        style={{ borderLeftColor: liveColor }}
                         className="p-2 rounded-lg border-l-3 bg-slate-50 dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-700/80 text-xs hover:bg-white dark:hover:bg-slate-800 transition-all shadow-xs"
                       >
                         <div className="text-[10px] font-mono tabular-nums text-indigo-600 dark:text-indigo-400 font-semibold">
@@ -488,6 +497,10 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                         minute: '2-digit'
                       }).format(new Date(evt.endTime))}`;
 
+                  const calSource = calendarMap.get(evt.calendarId);
+                  const liveColor = calSource?.color || evt.calendarColor || '#6366F1';
+                  const liveCalName = calSource?.name || evt.calendarName || 'Agenda';
+
                   return (
                     <div
                       key={evt.id}
@@ -497,7 +510,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                       <div className="flex items-start gap-3.5">
                         <div
                           className="w-3 h-3 rounded-full mt-1 shrink-0"
-                          style={{ backgroundColor: evt.calendarColor || '#6366F1' }}
+                          style={{ backgroundColor: liveColor }}
                         />
                         <div className="space-y-1">
                           <div className="flex items-center gap-2 flex-wrap">
@@ -506,10 +519,11 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                             </h4>
                             {assignedMember && (
                               <span
-                                className="text-xs px-2 py-0.5 rounded font-medium text-white"
+                                className="inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-full font-medium text-white"
                                 style={{ backgroundColor: assignedMember.color }}
                               >
-                                {assignedMember.avatar} {assignedMember.name}
+                                <MemberAvatar member={assignedMember} size="xs" className="border-white/80" />
+                                <span>{assignedMember.name}</span>
                               </span>
                             )}
                           </div>
@@ -532,7 +546,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                           {timeFormatted}
                         </div>
                         <div className="text-[11px] text-slate-400">
-                          {evt.calendarName || 'Agenda'}
+                          {liveCalName}
                         </div>
                       </div>
                     </div>
@@ -568,6 +582,10 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                       minute: '2-digit'
                     }).format(new Date(evt.startTime));
 
+                const calSource = calendarMap.get(evt.calendarId);
+                const liveColor = calSource?.color || evt.calendarColor || '#6366F1';
+                const liveCalName = calSource?.name || evt.calendarName || 'Agenda';
+
                 return (
                   <div
                     key={evt.id}
@@ -577,7 +595,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                     <div className="flex items-center gap-3">
                       <div
                         className="w-2.5 h-2.5 rounded-full shrink-0"
-                        style={{ backgroundColor: evt.calendarColor || '#6366F1' }}
+                        style={{ backgroundColor: liveColor }}
                       />
                       <div>
                         <div className="font-semibold text-slate-900 dark:text-white text-sm">
@@ -592,7 +610,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
 
                     <div className="text-right shrink-0">
                       <span className="text-xs text-slate-400 font-mono">
-                        {evt.calendarName || 'Agenda'}
+                        {liveCalName}
                       </span>
                     </div>
                   </div>
