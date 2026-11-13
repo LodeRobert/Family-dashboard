@@ -24,8 +24,8 @@ COPY --from=builder /app/dist ./dist
 COPY server.ts ./
 COPY firebase-applet-config.json ./
 
-# Zorg dat de persistente datamap bestaat
-RUN mkdir -p /data
+# Zorg dat de persistente datamap en avatars-map bestaan
+RUN mkdir -p /data /data/avatars
 VOLUME ["/data"]
 
 EXPOSE 3000

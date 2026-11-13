@@ -9,7 +9,9 @@ build/
 
 # Local database and persistent storage (don't commit personal family data)
 data/*.json
+data/avatars/
 !data/.gitkeep
+.aistudio/
 
 # Environment variables
 .env

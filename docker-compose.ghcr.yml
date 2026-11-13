@@ -13,6 +13,7 @@
 services:
   homeboard:
     image: ghcr.io/<JOUW-GITHUB-NAAM>/<REPO-NAAM>:latest
+    pull_policy: always
     container_name: homeboard
     restart: unless-stopped
     ports:
