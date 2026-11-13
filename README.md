@@ -6,15 +6,16 @@
 
 ## ✨ Functionaliteiten
 
-- 📅 **Interactieve Kalender (Google Agenda & Feeds)**:
+- 📅 **Interactieve Kalender (iCal & Lokale Agenda's)**:
   - Bekijk al je gezins- en werkagenda's in **Dag-**, **Week-**, **Maand-** en **Agendalijst-weergave**.
-  - **Volledig kleurenspectrum**: Kies voor elke lokale, Google- of iCal-agenda een eigen kleur uit het volledige kleurenspectrum en voeg onbeperkt lokale agenda's toe.
-  - **Google Agenda koppelen via iCal**: Koppel direct via het geheime iCal-adres van Google Agenda — werkt binnen 1 minuut op elk lokaal IP-adres.
-  - **Eigen Google OAuth Client ID**: Vul in **Instellingen** je eigen Google Cloud OAuth Client ID in om direct met je Google-account in te loggen op jouw eigen thuisadres/domein.
-  - **Afspraken toevoegen & bewerken**: Voeg eenvoudig afspraken toe met titel, datum, tijden, gekoppeld gezinslid, locatie en beschrijving.
-- ⭐ **Takenbord & Aanpasbaar Gezin (Home-Board Stijl)**:
-  - Stel in **Instellingen** je eigen gezin samen: gezinsleden toevoegen, bewerken of verwijderen met rol (Ouder/Kind), eigen kleur en **eigen profielfoto** (lokaal opgeslagen in `data/avatars/`).
-  - Dagelijkse routines verdeeld over **Ochtend**, **Middag** en **Avond** met confetti-animatie en **Beloningenwinkel**.
+  - **Volledig kleurenspectrum**: Kies voor elke lokale of iCal-agenda een eigen kleur uit het volledige kleurenspectrum en maak onbeperkt lokale agenda's aan.
+  - **Agenda's koppelen via iCal**: Koppel eenvoudig elke Google-, Apple- of Outlook-agenda via de geheime iCal-link (`.ics`) — werkt op elk lokaal netwerk zonder cloud-account.
+  - **Afspraken toevoegen & bewerken**: Voeg eenvoudig lokale afspraken toe met titel, datum, tijden, gekoppeld gezinslid, locatie en beschrijving.
+- ⭐ **Takenbord, Sterren-agenda & Algemene Taken**:
+  - **Dagroutines op moment van de dag**: Taken voor **Ochtend** (00:00–12:00), **Middag** (12:00–18:00), **Avond** (18:00–00:00) of **Hele dag** (altijd af te vinken). Elke dag start automatisch om **00:00** opnieuw, en voorbije dagen blijven achteraf aanpasbaar.
+  - **Sterren-agenda & Historiek**: Maandoverzicht waarop je per dag precies ziet wie welke sterren verdiend of ingewisseld heeft.
+  - **Algemene Taken**: Volledig ingebouwde takenlijsten (zoals *Algemeen*, *Boodschappen*, *Klusjes*) ter vervanging van Google Tasks.
+  - **Wachtwoordbeveiligde Instellingen**: Stel bij het opstarten een wachtwoord in; pas alleen met wachtwoord het gezin, sterrensaldo's (toevoegen/aftrekken) en profielfoto's (`data/avatars/`) aan.
 - 🕒 **Aanpasbare Begroeting, Live Klok & Lokaal Weer**:
   - Kies in **Instellingen** zelf de naam van je bord en of je wel of geen familienaam/huishoudnaam in de begroeting toont.
   - Kies je eigen **woonplaats** voor automatisch live weer (via Open-Meteo, zonder API-key).
@@ -88,25 +89,17 @@ Open daarna in je browser:
 
 ---
 
-## 📆 Google Agenda Koppelen
+## 📆 Externe Agenda Koppelen (iCal)
 
-HomeBoard ondersteunt twee gratis manieren om je Google Agenda's te koppelen:
+HomeBoard koppelt externe agenda's (zoals Google Agenda, Apple iCloud of Outlook) snel en betrouwbaar via een **iCal-link (.ics)** — zonder Google Cloud of OAuth configuratie:
 
-### Methode 1: Via iCal Geheime Link (Aanbevolen & Binnen 1 Minuut Klaar)
-Dit is de snelste methode en werkt gegarandeerd in elke Docker omgeving zonder dat je een Google Cloud ontwikkelaarsaccount nodig hebt:
 1. Ga op je computer naar [Google Agenda](https://calendar.google.com).
 2. Beweeg in de linkerzijbalk over de gewenste agenda, klik op de **3 puntjes** en kies **Instellingen en delen**.
 3. Scroll naar beneden naar het kopje **Agenda integreren**.
 4. Kopieer de link bij **Geheim adres in iCal-indeling** (eindigend op `.ics`).
-5. Open in HomeBoard het menu **Koppelingen** (of klik in de Kalender op *Koppelingen*).
-6. Plak de link op het tabblad **Direct Koppelen (iCal / Preview)** en klik op **Google Agenda Nu Koppelen**.
-7. Al je afspraken worden direct binnengehaald en automatisch bijgewerkt!
-
-### Methode 2: Direct inloggen met Google (OAuth)
-- Ga in HomeBoard naar **Instellingen** → **Agenda's, Kleuren & Google OAuth**.
-- Maak in [Google Cloud Console](https://console.cloud.google.com/apis/credentials) een **OAuth 2.0 Client ID (Webapplicatie)** aan met de **Google Calendar API** ingeschakeld.
-- Voeg jouw eigen HomeBoard-adres toe onder **Geautoriseerde JavaScript-oorsprongen** (bijv. `http://localhost:3000` of `https://agenda.mijndomein.nl` — let op dat Google voor OAuth geen losse IP-adressen zoals `192.168.x.x` accepteert, wel `localhost`, een domeinnaam of `*.sslip.io`).
-- Plak je Client ID in **Instellingen** en log in via **Koppelingen** → **Inloggen met Google (OAuth)**.
+5. Open in HomeBoard **Kalender → Koppelingen** (of via **Instellingen → iCal Agenda Koppelen**).
+6. Plak de link, kies een naam en kleur uit het volledige spectrum en klik op **iCal Agenda Koppelen**.
+7. Al je afspraken worden direct opgehaald en automatisch ververst!
 
 ---
 

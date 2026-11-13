@@ -1,4 +1,5 @@
 import { AppState, CalendarEvent, CalendarSource, WeatherLocationResult } from '../types';
+import { getLocalDateStr } from '../utils/dateTime';
 
 const LOCAL_STORAGE_KEY = 'homeboard_state_v1';
 
@@ -58,7 +59,6 @@ const FALLBACK_DEFAULT_STATE: AppState = {
       title: 'Tanden poetsen & gezicht wassen',
       period: 'morning',
       stars: 1,
-      completedToday: false,
       icon: '🪥'
     },
     {
@@ -67,7 +67,6 @@ const FALLBACK_DEFAULT_STATE: AppState = {
       title: 'Schooltas inpakken & drinkbus vullen',
       period: 'morning',
       stars: 1,
-      completedToday: true,
       icon: '🎒'
     },
     {
@@ -76,17 +75,44 @@ const FALLBACK_DEFAULT_STATE: AppState = {
       title: 'Huiswerk / 15 min lezen 📖',
       period: 'afternoon',
       stars: 2,
-      completedToday: false,
       icon: '📚'
     },
     {
-      id: 'chr-4',
+      id: 'chr-5',
+      memberId: 'fam-3',
+      title: 'Drinkfles en brooddoos op het aanrecht zetten',
+      period: 'all_day',
+      stars: 1,
+      icon: '✨'
+    },
+    {
+      id: 'chr-7',
       memberId: 'fam-4',
       title: 'Tafel dekken voor het avondeten',
       period: 'evening',
       stars: 2,
-      completedToday: false,
       icon: '🍽️'
+    }
+  ],
+  choreCompletionsByDate: {},
+  starLogs: [],
+  generalTasks: [
+    {
+      id: 'gt-1',
+      title: 'Melk, brood en vers fruit halen',
+      notes: 'Appels en bananen voor in de broodtrommel',
+      listName: 'Boodschappen',
+      completed: false,
+      createdAt: new Date().toISOString(),
+      priority: 'normal'
+    },
+    {
+      id: 'gt-2',
+      title: 'Batterijen voor zaklamp meebrengen',
+      listName: 'Algemeen',
+      completed: false,
+      createdAt: new Date().toISOString(),
+      priority: 'low'
     }
   ],
   rewards: [
@@ -104,8 +130,7 @@ const FALLBACK_DEFAULT_STATE: AppState = {
     weatherTemp: 18,
     weatherCondition: 'Zonnig',
     weatherCode: 0,
-    googleClientId: '',
-    customAppUrl: '',
+    hasSettingsPassword: false,
     kioskAutoDim: false,
     kioskDimAfterMinutes: 10,
     kioskTheme: 'auto',
@@ -114,9 +139,31 @@ const FALLBACK_DEFAULT_STATE: AppState = {
 };
 
 function normalizeState(raw: any): AppState {
+  const rawCalendars = Array.isArray(raw?.calendars)
+    ? raw.calendars.filter((c: any) => c.type !== 'google_oauth')
+    : FALLBACK_DEFAULT_STATE.calendars;
+
+  let choreCompletionsByDate = raw?.choreCompletionsByDate;
+  if (!choreCompletionsByDate || typeof choreCompletionsByDate !== 'object') {
+    choreCompletionsByDate = {};
+    const todayStr = getLocalDateStr();
+    const completedIds = (raw?.chores || [])
+      .filter((c: any) => c.completedToday)
+      .map((c: any) => c.id);
+    if (completedIds.length > 0) {
+      choreCompletionsByDate[todayStr] = completedIds;
+    }
+  }
+
   return {
     ...FALLBACK_DEFAULT_STATE,
     ...raw,
+    calendars: rawCalendars.length > 0 ? rawCalendars : FALLBACK_DEFAULT_STATE.calendars,
+    choreCompletionsByDate,
+    starLogs: Array.isArray(raw?.starLogs) ? raw.starLogs : [],
+    generalTasks: Array.isArray(raw?.generalTasks)
+      ? raw.generalTasks
+      : FALLBACK_DEFAULT_STATE.generalTasks,
     settings: {
       ...FALLBACK_DEFAULT_STATE.settings,
       ...(raw?.settings || {})
@@ -161,6 +208,49 @@ export async function saveAppState(state: AppState): Promise<void> {
     });
   } catch (err) {
     console.warn('Could not sync state to server:', err);
+  }
+}
+
+export async function setupSettingsPassword(password: string): Promise<void> {
+  const res = await fetch('/api/settings/password/setup', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ password })
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.error || 'Kon wachtwoord niet instellen.');
+  }
+}
+
+export async function verifySettingsPassword(password: string): Promise<boolean> {
+  const res = await fetch('/api/settings/password/verify', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ password })
+  });
+  if (res.status === 401) {
+    return false;
+  }
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.error || 'Fout bij controleren van wachtwoord.');
+  }
+  return Boolean(data.valid);
+}
+
+export async function changeSettingsPassword(
+  currentPassword: string,
+  newPassword: string
+): Promise<void> {
+  const res = await fetch('/api/settings/password/change', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ currentPassword, newPassword })
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.error || 'Kon wachtwoord niet wijzigen.');
   }
 }
 

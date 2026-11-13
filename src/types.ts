@@ -1,4 +1,4 @@
-export type CalendarType = 'local' | 'google_oauth' | 'ical';
+export type CalendarType = 'local' | 'ical';
 
 export interface CalendarSource {
   id: string;
@@ -8,7 +8,6 @@ export interface CalendarSource {
   visible: boolean;
   description?: string;
   url?: string; // For iCal feeds
-  googleId?: string; // For Google Calendar ID (e.g. primary)
   isReadOnly?: boolean;
 }
 
@@ -37,7 +36,7 @@ export interface FamilyMember {
   stars: number;
 }
 
-export type ChorePeriod = 'morning' | 'afternoon' | 'evening';
+export type ChorePeriod = 'morning' | 'afternoon' | 'evening' | 'all_day';
 
 export interface Chore {
   id: string;
@@ -45,8 +44,34 @@ export interface Chore {
   title: string;
   period: ChorePeriod;
   stars: number;
-  completedToday: boolean;
   icon?: string;
+  completedToday?: boolean; // Legacy field kept optional for smooth migration
+}
+
+export type StarLogType = 'chore' | 'manual_adjustment' | 'reward_claim';
+
+export interface StarLogEntry {
+  id: string;
+  date: string; // Local YYYY-MM-DD
+  timestamp: string; // ISO timestamp
+  memberId: string;
+  choreId?: string;
+  title: string;
+  stars: number; // Positive for earned, negative for deducted/claimed
+  type: StarLogType;
+}
+
+export interface GeneralTask {
+  id: string;
+  title: string;
+  notes?: string;
+  listName: string; // e.g., 'Algemeen', 'Boodschappen', 'Klusjes'
+  dueDate?: string; // YYYY-MM-DD
+  assignedTo?: string; // Optional FamilyMember ID
+  completed: boolean;
+  completedAt?: string;
+  createdAt: string;
+  priority: 'low' | 'normal' | 'high';
 }
 
 export interface RewardItem {
@@ -66,8 +91,7 @@ export interface AppSettings {
   weatherTemp: number;
   weatherCondition: string;
   weatherCode?: number;
-  googleClientId?: string;
-  customAppUrl?: string;
+  hasSettingsPassword?: boolean;
   kioskAutoDim: boolean;
   kioskDimAfterMinutes: number;
   kioskTheme: 'auto' | 'light' | 'dark';
@@ -79,6 +103,9 @@ export interface AppState {
   calendars: CalendarSource[];
   events: CalendarEvent[];
   chores: Chore[];
+  choreCompletionsByDate: Record<string, string[]>; // Local YYYY-MM-DD -> completed chore IDs
+  starLogs: StarLogEntry[];
+  generalTasks: GeneralTask[];
   rewards: RewardItem[];
   settings: AppSettings;
 }

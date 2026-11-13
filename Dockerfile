@@ -22,7 +22,6 @@ RUN npm install --omit=dev --no-audit --no-fund
 
 COPY --from=builder /app/dist ./dist
 COPY server.ts ./
-COPY firebase-applet-config.json ./
 
 # Zorg dat de persistente datamap en avatars-map bestaan
 RUN mkdir -p /data /data/avatars

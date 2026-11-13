@@ -4,9 +4,17 @@ import {
   FamilyMember,
   Chore,
   CalendarSource,
-  AppSettings
+  AppSettings,
+  GeneralTask
 } from '../types';
 import { MemberAvatar } from './MemberAvatar';
+import {
+  getLocalDateStr,
+  isChorePeriodActiveNow,
+  getChorePeriodLabel,
+  getChorePeriodTimeRange,
+  isChoreCompletedOnDate
+} from '../utils/dateTime';
 import {
   Calendar as CalendarIcon,
   CheckCircle2,
@@ -21,7 +29,9 @@ import {
   CloudRain,
   CloudSnow,
   CloudLightning,
-  CloudFog
+  CloudFog,
+  Lock,
+  ListTodo
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
@@ -30,12 +40,16 @@ interface DashboardViewProps {
   calendars: CalendarSource[];
   familyMembers: FamilyMember[];
   chores: Chore[];
+  choreCompletionsByDate: Record<string, string[]>;
+  generalTasks: GeneralTask[];
   settings: AppSettings;
+  todayStr: string;
   onOpenNewEvent: () => void;
   onNavigateToCalendar: () => void;
   onNavigateToChores: () => void;
   onNavigateToSettings: () => void;
-  onToggleChore: (choreId: string) => void;
+  onToggleChore: (choreId: string, dateStr: string) => void;
+  onToggleGeneralTask: (taskId: string) => void;
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({
@@ -43,12 +57,16 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   calendars,
   familyMembers,
   chores,
+  choreCompletionsByDate,
+  generalTasks,
   settings,
+  todayStr,
   onOpenNewEvent,
   onNavigateToCalendar,
   onNavigateToChores,
   onNavigateToSettings,
-  onToggleChore
+  onToggleChore,
+  onToggleGeneralTask
 }) => {
   const [currentTime, setCurrentTime] = useState(new Date());
 
@@ -76,18 +94,17 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       ? `${greeting}, ${settings.familyGreetingName.trim()}! 👋`
       : `${greeting}! 👋`;
 
-  // Calendar color lookup so changing a calendar color updates all its events immediately
   const calendarMap = new Map<string, CalendarSource>(calendars.map(c => [c.id, c]));
   const visibleCalendarIds = new Set(calendars.filter(c => c.visible).map(c => c.id));
 
-  const todayStr = currentTime.toISOString().split('T')[0];
+  const localToday = getLocalDateStr(currentTime);
 
   const todayEvents = events
     .filter(evt => visibleCalendarIds.has(evt.calendarId))
     .filter(evt => {
       const startDay = evt.startTime.split('T')[0];
       const endDay = evt.endTime.split('T')[0];
-      return startDay === todayStr || (startDay <= todayStr && endDay >= todayStr);
+      return startDay === localToday || (startDay <= localToday && endDay >= localToday);
     })
     .sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
 
@@ -95,7 +112,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     .filter(evt => visibleCalendarIds.has(evt.calendarId))
     .filter(evt => {
       const startDay = evt.startTime.split('T')[0];
-      return startDay > todayStr;
+      return startDay > localToday;
     })
     .sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime())
     .slice(0, 5);
@@ -115,15 +132,26 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   }).format(currentTime);
 
   const handleChoreClick = (chore: Chore) => {
-    if (!chore.completedToday) {
+    if (!isChorePeriodActiveNow(chore.period, currentTime)) return;
+    const isCompleted = isChoreCompletedOnDate(choreCompletionsByDate, todayStr, chore.id);
+    if (!isCompleted) {
       confetti({
         particleCount: 50,
         spread: 60,
         origin: { y: 0.7 }
       });
     }
-    onToggleChore(chore.id);
+    onToggleChore(chore.id, todayStr);
   };
+
+  // Show active-period & all-day chores first on Dashboard
+  const sortedChores = [...chores].sort((a, b) => {
+    const aActive = isChorePeriodActiveNow(a.period, currentTime) ? 0 : 1;
+    const bActive = isChorePeriodActiveNow(b.period, currentTime) ? 0 : 1;
+    return aActive - bActive;
+  });
+
+  const openGeneralTasks = generalTasks.filter(t => !t.completed).slice(0, 4);
 
   const renderWeatherIcon = () => {
     const code = settings.weatherCode ?? 0;
@@ -370,7 +398,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           )}
         </div>
 
-        {/* Right Column: Takenbord & Gezinsleden */}
+        {/* Right Column: Takenbord, Gezinsleden & Algemene Taken */}
         <div className="lg:col-span-5 space-y-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -392,7 +420,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-2 gap-3">
             {familyMembers.map(member => {
               const memberChores = chores.filter(c => c.memberId === member.id);
-              const completedCount = memberChores.filter(c => c.completedToday).length;
+              const completedCount = memberChores.filter(c =>
+                isChoreCompletedOnDate(choreCompletionsByDate, todayStr, c.id)
+              ).length;
 
               return (
                 <div
@@ -424,36 +454,52 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             })}
           </div>
 
-          {/* Quick routine check list */}
+          {/* Quick routine check list (with time-of-day enforcement) */}
           <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-4 shadow-xs space-y-3">
             <div className="flex items-center justify-between text-xs text-slate-500">
               <span className="font-semibold uppercase tracking-wider">
                 Vandaag afvinken ({greetingPeriod})
               </span>
-              <span>Tik om te voltooien ⭐</span>
+              <span>Alleen actief dagdeel & hele dag</span>
             </div>
 
             <div className="space-y-2">
-              {chores.length === 0 ? (
+              {sortedChores.length === 0 ? (
                 <p className="text-xs text-slate-400 text-center py-4">
                   Nog geen taken aangemaakt. Voeg taken toe op het Takenbord.
                 </p>
               ) : (
-                chores.slice(0, 5).map(chore => {
+                sortedChores.slice(0, 5).map(chore => {
                   const member = familyMembers.find(m => m.id === chore.memberId);
+                  const isCompleted = isChoreCompletedOnDate(
+                    choreCompletionsByDate,
+                    todayStr,
+                    chore.id
+                  );
+                  const isActive = isChorePeriodActiveNow(chore.period, currentTime);
 
                   return (
                     <button
                       key={chore.id}
                       onClick={() => handleChoreClick(chore)}
+                      disabled={!isActive}
+                      title={
+                        isActive
+                          ? 'Tik om te voltooien'
+                          : `Alleen af te vinken in ${getChorePeriodLabel(chore.period).toLowerCase()} (${getChorePeriodTimeRange(chore.period)})`
+                      }
                       className={`w-full p-2.5 rounded-lg border text-left flex items-center justify-between gap-3 transition-all ${
-                        chore.completedToday
+                        !isActive
+                          ? 'bg-slate-50/60 dark:bg-slate-800/20 border-slate-200/60 dark:border-slate-800 text-slate-400 cursor-not-allowed opacity-70'
+                          : isCompleted
                           ? 'bg-emerald-50/60 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800/50 text-emerald-900 dark:text-emerald-200'
                           : 'bg-slate-50/80 dark:bg-slate-800/40 border-slate-200 dark:border-slate-700/60 text-slate-800 dark:text-slate-200 hover:border-indigo-300'
                       }`}
                     >
                       <div className="flex items-center gap-2.5 truncate">
-                        {chore.completedToday ? (
+                        {!isActive && !isCompleted ? (
+                          <Lock className="w-4 h-4 text-slate-400 shrink-0" />
+                        ) : isCompleted ? (
                           <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
                         ) : (
                           <Circle className="w-4 h-4 text-slate-400 shrink-0" />
@@ -461,7 +507,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                         <span className="text-base shrink-0">{chore.icon || '📌'}</span>
                         <span
                           className={`text-xs font-medium truncate ${
-                            chore.completedToday ? 'line-through text-emerald-700/70 dark:text-emerald-300/70' : ''
+                            isCompleted
+                              ? 'line-through text-emerald-700/70 dark:text-emerald-300/70'
+                              : ''
                           }`}
                         >
                           {chore.title}
@@ -469,8 +517,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                       </div>
 
                       <div className="flex items-center gap-1.5 shrink-0 text-xs">
+                        <span className="text-[10px] text-slate-400 hidden sm:inline">
+                          {getChorePeriodLabel(chore.period)}
+                        </span>
                         {member && (
-                          <span className="text-[10px] text-slate-500 font-medium hidden sm:inline">
+                          <span className="text-[10px] text-slate-500 font-medium">
                             {member.name}
                           </span>
                         )}
@@ -483,6 +534,48 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 })
               )}
             </div>
+          </div>
+
+          {/* Open General Tasks Widget */}
+          <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-4 shadow-xs space-y-2.5">
+            <div className="flex items-center justify-between text-xs">
+              <span className="font-semibold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
+                <ListTodo className="w-3.5 h-3.5 text-indigo-500" />
+                <span>Algemene taken ({generalTasks.filter(t => !t.completed).length})</span>
+              </span>
+              <button
+                type="button"
+                onClick={onNavigateToChores}
+                className="text-indigo-600 dark:text-indigo-400 font-semibold hover:underline"
+              >
+                Beheren
+              </button>
+            </div>
+
+            {openGeneralTasks.length === 0 ? (
+              <p className="text-xs text-slate-400 py-2">Geen openstaande algemene taken.</p>
+            ) : (
+              <div className="space-y-1.5">
+                {openGeneralTasks.map(task => (
+                  <button
+                    key={task.id}
+                    type="button"
+                    onClick={() => onToggleGeneralTask(task.id)}
+                    className="w-full p-2 rounded-lg border border-slate-200 dark:border-slate-800 hover:border-indigo-300 bg-slate-50/70 dark:bg-slate-800/40 text-left flex items-center justify-between gap-2 text-xs transition-colors"
+                  >
+                    <div className="flex items-center gap-2 truncate">
+                      <Circle className="w-4 h-4 text-slate-400 shrink-0" />
+                      <span className="font-medium text-slate-800 dark:text-slate-200 truncate">
+                        {task.title}
+                      </span>
+                    </div>
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-200/70 dark:bg-slate-700 text-slate-600 dark:text-slate-300 shrink-0">
+                      {task.listName}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       </div>

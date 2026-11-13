@@ -1,6 +1,7 @@
 import express, { Request, Response } from 'express';
 import path from 'path';
 import fs from 'fs';
+import crypto from 'crypto';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -22,6 +23,34 @@ if (!fs.existsSync(AVATARS_DIR)) {
   fs.mkdirSync(AVATARS_DIR, { recursive: true });
 }
 const DATA_FILE = path.join(DATA_DIR, 'homeboard-data.json');
+
+function getLocalTodayStr(): string {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  const d = String(now.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+function hashPassword(password: string): string {
+  const salt = crypto.randomBytes(16).toString('hex');
+  const derived = crypto.scryptSync(password, salt, 64).toString('hex');
+  return `${salt}:${derived}`;
+}
+
+function verifyPasswordHash(password: string, storedHash: string): boolean {
+  try {
+    const parts = storedHash.split(':');
+    if (parts.length !== 2) return false;
+    const [salt, keyHex] = parts;
+    const keyBuf = Buffer.from(keyHex, 'hex');
+    const derivedBuf = crypto.scryptSync(password, salt, 64);
+    if (keyBuf.length !== derivedBuf.length) return false;
+    return crypto.timingSafeEqual(keyBuf, derivedBuf);
+  } catch {
+    return false;
+  }
+}
 
 // Default initial state matching Home-Board style
 const DEFAULT_INITIAL_STATE = {
@@ -91,7 +120,6 @@ const DEFAULT_INITIAL_STATE = {
       title: 'Tanden poetsen & gezicht wassen',
       period: 'morning',
       stars: 1,
-      completedToday: false,
       icon: '🪥'
     },
     {
@@ -100,7 +128,6 @@ const DEFAULT_INITIAL_STATE = {
       title: 'Schooltas inpakken & drinkbus vullen',
       period: 'morning',
       stars: 1,
-      completedToday: true,
       icon: '🎒'
     },
     {
@@ -109,7 +136,6 @@ const DEFAULT_INITIAL_STATE = {
       title: 'Huiswerk / 15 min lezen 📖',
       period: 'afternoon',
       stars: 2,
-      completedToday: false,
       icon: '📚'
     },
     {
@@ -118,35 +144,60 @@ const DEFAULT_INITIAL_STATE = {
       title: 'Speelgoed opruimen & pyjama aan',
       period: 'evening',
       stars: 1,
-      completedToday: false,
       icon: '🧸'
     },
     {
       id: 'chr-5',
-      memberId: 'fam-4',
-      title: 'Tanden poetsen ochtend',
-      period: 'morning',
+      memberId: 'fam-3',
+      title: 'Drinkfles en brooddoos op het aanrecht zetten',
+      period: 'all_day',
       stars: 1,
-      completedToday: true,
-      icon: '🪥'
+      icon: '✨'
     },
     {
       id: 'chr-6',
       memberId: 'fam-4',
-      title: 'Tafel dekken voor het avondeten',
-      period: 'evening',
-      stars: 2,
-      completedToday: false,
-      icon: '🍽️'
+      title: 'Tanden poetsen ochtend',
+      period: 'morning',
+      stars: 1,
+      icon: '🪥'
     },
     {
       id: 'chr-7',
       memberId: 'fam-4',
-      title: 'Kamer netjes maken voor het slapen',
+      title: 'Tafel dekken voor het avondeten',
       period: 'evening',
+      stars: 2,
+      icon: '🍽️'
+    },
+    {
+      id: 'chr-8',
+      memberId: 'fam-4',
+      title: 'Kamer netjes maken',
+      period: 'all_day',
       stars: 1,
-      completedToday: false,
       icon: '✨'
+    }
+  ],
+  choreCompletionsByDate: {} as Record<string, string[]>,
+  starLogs: [] as any[],
+  generalTasks: [
+    {
+      id: 'gt-1',
+      title: 'Melk, brood en vers fruit halen',
+      notes: 'Appels en bananen voor in de broodtrommel',
+      listName: 'Boodschappen',
+      completed: false,
+      createdAt: new Date().toISOString(),
+      priority: 'normal'
+    },
+    {
+      id: 'gt-2',
+      title: 'Batterijen voor zaklamp meebrengen',
+      listName: 'Algemeen',
+      completed: false,
+      createdAt: new Date().toISOString(),
+      priority: 'low'
     }
   ],
   rewards: [
@@ -164,8 +215,7 @@ const DEFAULT_INITIAL_STATE = {
     weatherTemp: 18,
     weatherCondition: 'Zonnig',
     weatherCode: 0,
-    googleClientId: '',
-    customAppUrl: '',
+    settingsPasswordHash: '',
     kioskAutoDim: false,
     kioskDimAfterMinutes: 10,
     kioskTheme: 'auto',
@@ -178,13 +228,40 @@ if (!fs.existsSync(DATA_FILE)) {
   fs.writeFileSync(DATA_FILE, JSON.stringify(DEFAULT_INITIAL_STATE, null, 2), 'utf-8');
 }
 
-function getStoredData() {
+function getRawStoredData(): any {
   try {
     const raw = fs.readFileSync(DATA_FILE, 'utf-8');
     const parsed = JSON.parse(raw);
+
+    // Strip any legacy google_oauth calendars gracefully (only local & ical supported now)
+    const rawCalendars = Array.isArray(parsed.calendars)
+      ? parsed.calendars.filter((c: any) => c.type !== 'google_oauth')
+      : DEFAULT_INITIAL_STATE.calendars;
+
+    const calendars = rawCalendars.length > 0 ? rawCalendars : DEFAULT_INITIAL_STATE.calendars;
+
+    // One-time migration from legacy chore.completedToday to choreCompletionsByDate
+    let choreCompletionsByDate = parsed.choreCompletionsByDate;
+    if (!choreCompletionsByDate || typeof choreCompletionsByDate !== 'object') {
+      choreCompletionsByDate = {};
+      const todayStr = getLocalTodayStr();
+      const completedIds = (parsed.chores || [])
+        .filter((c: any) => c.completedToday)
+        .map((c: any) => c.id);
+      if (completedIds.length > 0) {
+        choreCompletionsByDate[todayStr] = completedIds;
+      }
+    }
+
     return {
       ...DEFAULT_INITIAL_STATE,
       ...parsed,
+      calendars,
+      choreCompletionsByDate,
+      starLogs: Array.isArray(parsed.starLogs) ? parsed.starLogs : [],
+      generalTasks: Array.isArray(parsed.generalTasks)
+        ? parsed.generalTasks
+        : DEFAULT_INITIAL_STATE.generalTasks,
       settings: {
         ...DEFAULT_INITIAL_STATE.settings,
         ...(parsed.settings || {})
@@ -194,6 +271,18 @@ function getStoredData() {
     console.error('Error reading data file, falling back to initial:', err);
     return DEFAULT_INITIAL_STATE;
   }
+}
+
+function sanitizeStateForClient(data: any) {
+  const { settingsPasswordHash, googleClientId: _gcid, customAppUrl: _cau, ...safeSettings } =
+    data.settings || {};
+  return {
+    ...data,
+    settings: {
+      ...safeSettings,
+      hasSettingsPassword: Boolean(settingsPasswordHash)
+    }
+  };
 }
 
 function saveStoredData(data: any) {
@@ -226,23 +315,111 @@ app.get('/api/health', (_req: Request, res: Response) => {
   });
 });
 
-// Get all persisted state
+// Get all persisted state (never exposes password hash)
 app.get('/api/storage/state', (_req: Request, res: Response) => {
-  const data = getStoredData();
-  res.json(data);
+  const data = getRawStoredData();
+  res.json(sanitizeStateForClient(data));
 });
 
-// Update state
+// Update state (preserves server-side settingsPasswordHash)
 app.post('/api/storage/state', (req: Request, res: Response) => {
   try {
     const updated = req.body;
     if (!updated || typeof updated !== 'object') {
       return res.status(400).json({ error: 'Ongeldige data' });
     }
-    saveStoredData(updated);
+    const current = getRawStoredData();
+    const { hasSettingsPassword: _ignore, ...incomingSettings } = updated.settings || {};
+    const mergedToSave = {
+      ...updated,
+      settings: {
+        ...current.settings,
+        ...incomingSettings,
+        settingsPasswordHash: current.settings?.settingsPasswordHash || ''
+      }
+    };
+    saveStoredData(mergedToSave);
     res.json({ success: true, timestamp: new Date().toISOString() });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
+  }
+});
+
+// --- SETTINGS PASSWORD ROUTES ---
+
+// Set password for the very first time
+app.post('/api/settings/password/setup', (req: Request, res: Response) => {
+  try {
+    const password = String(req.body?.password || '');
+    if (password.length < 4) {
+      return res.status(400).json({ error: 'Wachtwoord moet minimaal 4 tekens lang zijn.' });
+    }
+
+    const data = getRawStoredData();
+    if (data.settings?.settingsPasswordHash) {
+      return res.status(409).json({ error: 'Er is al een wachtwoord ingesteld.' });
+    }
+
+    data.settings = {
+      ...data.settings,
+      settingsPasswordHash: hashPassword(password)
+    };
+    saveStoredData(data);
+
+    res.json({ success: true, hasSettingsPassword: true });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || 'Kon wachtwoord niet instellen.' });
+  }
+});
+
+// Verify password to unlock Instellingen
+app.post('/api/settings/password/verify', (req: Request, res: Response) => {
+  try {
+    const password = String(req.body?.password || '');
+    const data = getRawStoredData();
+    const storedHash = data.settings?.settingsPasswordHash;
+
+    if (!storedHash) {
+      return res.json({ valid: true, hasSettingsPassword: false });
+    }
+
+    const valid = verifyPasswordHash(password, storedHash);
+    if (!valid) {
+      return res.status(401).json({ valid: false, error: 'Onjuist wachtwoord.' });
+    }
+
+    res.json({ valid: true });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || 'Fout bij controleren van wachtwoord.' });
+  }
+});
+
+// Change existing password from within unlocked Instellingen
+app.post('/api/settings/password/change', (req: Request, res: Response) => {
+  try {
+    const currentPassword = String(req.body?.currentPassword || '');
+    const newPassword = String(req.body?.newPassword || '');
+
+    if (newPassword.length < 4) {
+      return res.status(400).json({ error: 'Het nieuwe wachtwoord moet minimaal 4 tekens lang zijn.' });
+    }
+
+    const data = getRawStoredData();
+    const storedHash = data.settings?.settingsPasswordHash;
+
+    if (storedHash && !verifyPasswordHash(currentPassword, storedHash)) {
+      return res.status(401).json({ error: 'Huidig wachtwoord klopt niet.' });
+    }
+
+    data.settings = {
+      ...data.settings,
+      settingsPasswordHash: hashPassword(newPassword)
+    };
+    saveStoredData(data);
+
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || 'Kon wachtwoord niet wijzigen.' });
   }
 });
 
@@ -269,7 +446,6 @@ app.post('/api/avatars', (req: Request, res: Response) => {
 
     const safeMemberId = String(memberId).replace(/[^a-zA-Z0-9_-]/g, '');
 
-    // Remove previous avatar files for this member to keep /data/avatars clean
     try {
       const existing = fs.readdirSync(AVATARS_DIR);
       for (const file of existing) {

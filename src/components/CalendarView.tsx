@@ -6,6 +6,7 @@ import {
   FamilyMember
 } from '../types';
 import { MemberAvatar } from './MemberAvatar';
+import { getLocalDateStr } from '../utils/dateTime';
 import {
   ChevronLeft,
   ChevronRight,
@@ -105,7 +106,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
       days.push({
         date: d,
         isCurrentMonth: false,
-        dateStr: d.toISOString().split('T')[0]
+        dateStr: getLocalDateStr(d)
       });
     }
 
@@ -115,7 +116,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
       days.push({
         date: d,
         isCurrentMonth: true,
-        dateStr: d.toISOString().split('T')[0]
+        dateStr: getLocalDateStr(d)
       });
     }
 
@@ -126,7 +127,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
       days.push({
         date: d,
         isCurrentMonth: false,
-        dateStr: d.toISOString().split('T')[0]
+        dateStr: getLocalDateStr(d)
       });
     }
 
@@ -146,13 +147,13 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
       nextDay.setDate(monday.getDate() + i);
       week.push({
         date: nextDay,
-        dateStr: nextDay.toISOString().split('T')[0]
+        dateStr: getLocalDateStr(nextDay)
       });
     }
     return week;
   };
 
-  const todayStr = new Date().toISOString().split('T')[0];
+  const todayStr = getLocalDateStr();
 
   return (
     <div className="space-y-4 pb-12">
@@ -270,9 +271,6 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
               style={{ backgroundColor: cal.color }}
             />
             <span>{cal.name}</span>
-            {cal.type === 'google_oauth' && (
-              <span className="text-[10px] text-indigo-500 font-mono">(Google)</span>
-            )}
             {cal.type === 'ical' && (
               <span className="text-[10px] text-emerald-500 font-mono">(iCal)</span>
             )}
@@ -457,7 +455,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
               </p>
             </div>
             <button
-              onClick={() => onOpenNewEvent(currentDate.toISOString().split('T')[0])}
+              onClick={() => onOpenNewEvent(getLocalDateStr(currentDate))}
               className="px-3 py-1.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors"
             >
               + Afspraak op deze dag
@@ -465,7 +463,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
           </div>
 
           {(() => {
-            const dateStr = currentDate.toISOString().split('T')[0];
+            const dateStr = getLocalDateStr(currentDate);
             const dayEvents = activeEvents
               .filter(e => {
                 const s = e.startTime.split('T')[0];

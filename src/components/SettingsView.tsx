@@ -11,7 +11,8 @@ import { ColorPickerField } from './ColorPickerField';
 import {
   searchWeatherLocations,
   fetchCurrentWeather,
-  uploadMemberAvatar
+  uploadMemberAvatar,
+  changeSettingsPassword
 } from '../services/storage';
 import {
   UserPlus,
@@ -24,20 +25,26 @@ import {
   Plus,
   Download,
   Upload,
-  Check,
   Sparkles,
-  Globe,
   Clock,
   Sliders,
-  X
+  X,
+  Lock,
+  KeyRound,
+  Minus,
+  Check,
+  AlertCircle,
+  Link
 } from 'lucide-react';
 
 interface SettingsViewProps {
   appState: AppState;
   onUpdateSettings: (partial: Partial<AppSettings>) => void;
   onUpdateFamilyMembers: (members: FamilyMember[]) => void;
+  onAdjustMemberStars: (memberId: string, delta: number, reason?: string) => void;
   onUpdateCalendars: (calendars: CalendarSource[]) => void;
   onOpenManageCalendars: () => void;
+  onLockSettings: () => void;
   onRestoreState: (state: AppState) => Promise<void>;
 }
 
@@ -47,8 +54,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   appState,
   onUpdateSettings,
   onUpdateFamilyMembers,
+  onAdjustMemberStars,
   onUpdateCalendars,
   onOpenManageCalendars,
+  onLockSettings,
   onRestoreState
 }) => {
   const { settings, familyMembers, calendars } = appState;
@@ -72,13 +81,23 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [photoUploadError, setPhotoUploadError] = useState('');
   const [confirmDeleteMemberId, setConfirmDeleteMemberId] = useState<string | null>(null);
 
+  // Per-member manual star adjustment input
+  const [starReasons, setStarReasons] = useState<Record<string, string>>({});
+  const [customStarAmounts, setCustomStarAmounts] = useState<Record<string, string>>({});
+
   // New local calendar form
   const [isAddingCalendar, setIsAddingCalendar] = useState(false);
   const [newCalName, setNewCalName] = useState('');
   const [newCalColor, setNewCalColor] = useState('#8B5CF6');
   const [newCalDescription, setNewCalDescription] = useState('');
 
-  // Live preview of greeting
+  // Change password form
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmNewPassword, setConfirmNewPassword] = useState('');
+  const [passwordFeedback, setPasswordFeedback] = useState<{ type: 'ok' | 'err'; msg: string } | null>(null);
+  const [isChangingPassword, setIsChangingPassword] = useState(false);
+
   const previewGreetingText =
     settings.showFamilyNameInGreeting && settings.familyGreetingName.trim()
       ? `Goedemiddag, ${settings.familyGreetingName.trim()}! 👋`
@@ -215,6 +234,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     setIsAddingMember(false);
   };
 
+  const handleStarAdjust = (memberId: string, delta: number) => {
+    if (!delta || Number.isNaN(delta)) return;
+    const reason = (starReasons[memberId] || '').trim();
+    onAdjustMemberStars(memberId, delta, reason || undefined);
+    if (reason) {
+      setStarReasons(prev => ({ ...prev, [memberId]: '' }));
+    }
+  };
+
   // --- Calendar handlers ---
   const handleUpdateCalendarField = (calId: string, patch: Partial<CalendarSource>) => {
     onUpdateCalendars(
@@ -244,6 +272,33 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const handleDeleteCalendar = (calId: string) => {
     if (calendars.length <= 1) return;
     onUpdateCalendars(calendars.filter(c => c.id !== calId));
+  };
+
+  // --- Change password ---
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPasswordFeedback(null);
+    if (newPassword.length < 4) {
+      setPasswordFeedback({ type: 'err', msg: 'Nieuw wachtwoord moet minimaal 4 tekens zijn.' });
+      return;
+    }
+    if (newPassword !== confirmNewPassword) {
+      setPasswordFeedback({ type: 'err', msg: 'Nieuwe wachtwoorden komen niet overeen.' });
+      return;
+    }
+
+    try {
+      setIsChangingPassword(true);
+      await changeSettingsPassword(currentPassword, newPassword);
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmNewPassword('');
+      setPasswordFeedback({ type: 'ok', msg: 'Wachtwoord succesvol gewijzigd.' });
+    } catch (err: any) {
+      setPasswordFeedback({ type: 'err', msg: err.message || 'Kon wachtwoord niet wijzigen.' });
+    } finally {
+      setIsChangingPassword(false);
+    }
   };
 
   // --- Backup / Restore ---
@@ -278,20 +333,27 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     reader.readAsText(file);
   };
 
-  const currentBrowserOrigin = typeof window !== 'undefined' ? window.location.origin : '';
-
   return (
     <div className="space-y-6 pb-12 max-w-5xl mx-auto">
-      {/* Page Title */}
+      {/* Page Title + Lock Button */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-slate-900 dark:text-white tracking-tight">
             Instellingen
           </h1>
           <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400">
-            Pas jouw dashboard, begroeting, woonplaats, gezinsleden en agenda's aan.
+            Beheer begroeting, woonplaats, gezinsleden, sterren, iCal-agenda's en wachtwoord.
           </p>
         </div>
+
+        <button
+          type="button"
+          onClick={onLockSettings}
+          className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 shadow-xs transition-colors self-start sm:self-auto"
+        >
+          <Lock className="w-3.5 h-3.5 text-amber-500" />
+          <span>Instellingen vergrendelen</span>
+        </button>
       </div>
 
       {/* SECTION 1: Begroeting & Dashboardnaam */}
@@ -310,7 +372,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-5 text-xs">
           <div className="space-y-4">
-            {/* Toggle showFamilyNameInGreeting */}
             <label className="flex items-center justify-between gap-4 p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/40 cursor-pointer">
               <div>
                 <div className="font-semibold text-slate-900 dark:text-white text-sm">
@@ -331,7 +392,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             {settings.showFamilyNameInGreeting && (
               <div>
                 <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                  Naam in begroeting (bijv. Familie De Vries, Huize Bakker, Team Thuis)
+                  Naam in begroeting (bijv. Familie De Vries, Huize Bakker)
                 </label>
                 <input
                   type="text"
@@ -357,7 +418,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             </div>
           </div>
 
-          {/* Live Greeting Preview */}
           <div className="bg-gradient-to-br from-indigo-900 via-slate-900 to-slate-950 text-white rounded-xl p-5 flex flex-col justify-center space-y-2 border border-slate-800">
             <span className="text-[11px] text-indigo-300 uppercase tracking-wider font-semibold">
               Voorbeeld op dashboard · {settings.dashboardName || 'HomeBoard'}
@@ -458,17 +518,17 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         )}
       </section>
 
-      {/* SECTION 3: Gezin & Profielfoto's */}
+      {/* SECTION 3: Gezin, Profielfoto's & Sterren Beheren */}
       <section className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 sm:p-6 shadow-xs space-y-4">
         <div className="flex items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-3 flex-wrap">
           <div className="flex items-center gap-2.5">
             <Sparkles className="w-5 h-5 text-emerald-500" />
             <div>
               <h2 className="text-base font-bold text-slate-900 dark:text-white">
-                Gezinsleden & Profielfoto's
+                Gezinsleden, Profielfoto's & Sterren Beheer
               </h2>
               <p className="text-xs text-slate-500">
-                Stel samen wie er in jouw gezin zit voor het takenbord en de kalender. Foto's worden lokaal opgeslagen.
+                Pas je gezin aan, upload profielfoto's en voeg handmatig sterren toe of trek sterren af.
               </p>
             </div>
           </div>
@@ -612,160 +672,252 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
         {/* Existing Family Members List */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {familyMembers.map(member => (
-            <div
-              key={member.id}
-              className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 space-y-3 text-xs"
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex items-center gap-3">
-                  <div className="relative">
-                    <MemberAvatar member={member} size="lg" />
-                    <label
-                      className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-indigo-600 hover:bg-indigo-700 text-white flex items-center justify-center cursor-pointer shadow-xs"
-                      title="Upload foto voor dit gezinslid"
-                    >
-                      <Camera className="w-3 h-3" />
-                      <input
-                        type="file"
-                        accept="image/*"
-                        className="hidden"
-                        onChange={e => {
-                          const file = e.target.files?.[0];
-                          if (file) handleMemberPhotoUpload(member.id, file);
-                        }}
-                      />
-                    </label>
+          {familyMembers.map(member => {
+            const customAmt = parseInt(customStarAmounts[member.id] || '1', 10) || 1;
+            return (
+              <div
+                key={member.id}
+                className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 space-y-3.5 text-xs"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <div className="relative">
+                      <MemberAvatar member={member} size="lg" />
+                      <label
+                        className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-indigo-600 hover:bg-indigo-700 text-white flex items-center justify-center cursor-pointer shadow-xs"
+                        title="Upload foto voor dit gezinslid"
+                      >
+                        <Camera className="w-3 h-3" />
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={e => {
+                            const file = e.target.files?.[0];
+                            if (file) handleMemberPhotoUpload(member.id, file);
+                          }}
+                        />
+                      </label>
+                    </div>
+
+                    <div>
+                      <div className="font-bold text-sm text-slate-900 dark:text-white">
+                        {member.name}
+                      </div>
+                      <div className="text-[11px] text-slate-500">
+                        {uploadingMemberId === member.id
+                          ? 'Foto wordt opgeslagen...'
+                          : member.photoUrl
+                          ? 'Eigen foto actief'
+                          : 'Emoji als avatar'}
+                      </div>
+                      {member.photoUrl && (
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveMemberPhoto(member.id)}
+                          className="text-[11px] text-red-500 hover:underline mt-0.5"
+                        >
+                          Foto verwijderen
+                        </button>
+                      )}
+                    </div>
                   </div>
 
+                  {familyMembers.length > 1 && (
+                    <div>
+                      {confirmDeleteMemberId === member.id ? (
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteMember(member.id)}
+                            className="px-2 py-1 bg-red-600 text-white rounded text-[11px] font-semibold"
+                          >
+                            Bevestig
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setConfirmDeleteMemberId(null)}
+                            className="px-2 py-1 bg-slate-200 dark:bg-slate-700 rounded text-[11px]"
+                          >
+                            Nee
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setConfirmDeleteMemberId(member.id)}
+                          className="p-1.5 text-slate-400 hover:text-red-600 rounded-lg transition-colors"
+                          title="Gezinslid verwijderen"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
                   <div>
-                    <div className="font-bold text-sm text-slate-900 dark:text-white">
-                      {member.name}
-                    </div>
-                    <div className="text-[11px] text-slate-500">
-                      {uploadingMemberId === member.id
-                        ? 'Foto wordt opgeslagen...'
-                        : member.photoUrl
-                        ? 'Eigen foto actief'
-                        : 'Emoji als avatar'}
-                    </div>
-                    {member.photoUrl && (
-                      <button
-                        type="button"
-                        onClick={() => handleRemoveMemberPhoto(member.id)}
-                        className="text-[11px] text-red-500 hover:underline mt-0.5"
-                      >
-                        Foto verwijderen
-                      </button>
-                    )}
+                    <label className="block font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                      Naam
+                    </label>
+                    <input
+                      type="text"
+                      value={member.name}
+                      onChange={e => handleUpdateMemberField(member.id, { name: e.target.value })}
+                      className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                      Rol
+                    </label>
+                    <select
+                      value={member.role}
+                      onChange={e =>
+                        handleUpdateMemberField(member.id, {
+                          role: e.target.value as 'parent' | 'child'
+                        })
+                      }
+                      className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white"
+                    >
+                      <option value="child">Kind</option>
+                      <option value="parent">Ouder</option>
+                    </select>
                   </div>
                 </div>
 
-                {familyMembers.length > 1 && (
-                  <div>
-                    {confirmDeleteMemberId === member.id ? (
-                      <div className="flex items-center gap-1">
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteMember(member.id)}
-                          className="px-2 py-1 bg-red-600 text-white rounded text-[11px] font-semibold"
-                        >
-                          Bevestig
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setConfirmDeleteMemberId(null)}
-                          className="px-2 py-1 bg-slate-200 dark:bg-slate-700 rounded text-[11px]"
-                        >
-                          Nee
-                        </button>
-                      </div>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => setConfirmDeleteMemberId(member.id)}
-                        className="p-1.5 text-slate-400 hover:text-red-600 rounded-lg transition-colors"
-                        title="Gezinslid verwijderen"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    )}
-                  </div>
-                )}
-              </div>
+                <div className="flex items-end justify-between gap-2 flex-wrap">
+                  <ColorPickerField
+                    label="Kleur"
+                    value={member.color}
+                    onChange={color => handleUpdateMemberField(member.id, { color })}
+                    compact
+                  />
 
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="block font-semibold text-slate-600 dark:text-slate-400 mb-1">
-                    Naam
-                  </label>
+                  <div>
+                    <label className="block font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                      Emoji
+                    </label>
+                    <select
+                      value={member.avatar}
+                      onChange={e => handleUpdateMemberField(member.id, { avatar: e.target.value })}
+                      className="px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-base"
+                    >
+                      {EMOJI_CHOICES.map(em => (
+                        <option key={em} value={em}>
+                          {em}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                {/* Manual Star Management per Member */}
+                <div className="pt-3 border-t border-slate-200 dark:border-slate-700/70 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="font-semibold text-slate-700 dark:text-slate-300">
+                      Sterrensaldo aanpassen
+                    </span>
+                    <span className="inline-flex items-center gap-1 font-mono font-bold text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/60 px-2 py-0.5 rounded-md">
+                      <Sparkles className="w-3 h-3 fill-current" />
+                      {member.stars} sterren
+                    </span>
+                  </div>
+
                   <input
                     type="text"
-                    value={member.name}
-                    onChange={e => handleUpdateMemberField(member.id, { name: e.target.value })}
-                    className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white"
-                  />
-                </div>
-                <div>
-                  <label className="block font-semibold text-slate-600 dark:text-slate-400 mb-1">
-                    Rol
-                  </label>
-                  <select
-                    value={member.role}
+                    value={starReasons[member.id] || ''}
                     onChange={e =>
-                      handleUpdateMemberField(member.id, {
-                        role: e.target.value as 'parent' | 'child'
-                      })
+                      setStarReasons(prev => ({ ...prev, [member.id]: e.target.value }))
                     }
-                    className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white"
-                  >
-                    <option value="child">Kind</option>
-                    <option value="parent">Ouder</option>
-                  </select>
+                    placeholder="Optionele reden (bijv. Goed geholpen, Afspraak niet nagekomen)"
+                    className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-[11px] text-slate-800 dark:text-slate-200"
+                  />
+
+                  <div className="flex items-center justify-between gap-1.5 flex-wrap">
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => handleStarAdjust(member.id, -5)}
+                        disabled={member.stars === 0}
+                        className="px-2 py-1.5 rounded-lg border border-red-200 dark:border-red-900/60 bg-red-50 dark:bg-red-950/40 text-red-700 dark:text-red-300 font-mono font-bold hover:bg-red-100 disabled:opacity-40"
+                      >
+                        -5★
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleStarAdjust(member.id, -1)}
+                        disabled={member.stars === 0}
+                        className="px-2 py-1.5 rounded-lg border border-red-200 dark:border-red-900/60 bg-red-50 dark:bg-red-950/40 text-red-700 dark:text-red-300 font-mono font-bold hover:bg-red-100 disabled:opacity-40"
+                      >
+                        -1★
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleStarAdjust(member.id, 1)}
+                        className="px-2 py-1.5 rounded-lg border border-emerald-200 dark:border-emerald-900/60 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 font-mono font-bold hover:bg-emerald-100"
+                      >
+                        +1★
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleStarAdjust(member.id, 5)}
+                        className="px-2 py-1.5 rounded-lg border border-emerald-200 dark:border-emerald-900/60 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 font-mono font-bold hover:bg-emerald-100"
+                      >
+                        +5★
+                      </button>
+                    </div>
+
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="number"
+                        min={1}
+                        max={100}
+                        value={customStarAmounts[member.id] ?? '3'}
+                        onChange={e =>
+                          setCustomStarAmounts(prev => ({ ...prev, [member.id]: e.target.value }))
+                        }
+                        className="w-12 px-1.5 py-1 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono text-center"
+                        aria-label="Aantal sterren"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => handleStarAdjust(member.id, -customAmt)}
+                        disabled={member.stars === 0}
+                        title="Aftrekken"
+                        className="p-1.5 rounded border border-slate-200 dark:border-slate-700 hover:bg-red-50 dark:hover:bg-red-950/40 text-red-600 disabled:opacity-40"
+                      >
+                        <Minus className="w-3 h-3" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleStarAdjust(member.id, customAmt)}
+                        title="Toevoegen"
+                        className="p-1.5 rounded border border-slate-200 dark:border-slate-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 text-emerald-600"
+                      >
+                        <Plus className="w-3 h-3" />
+                      </button>
+                    </div>
+                  </div>
                 </div>
               </div>
-
-              <div className="flex items-end justify-between gap-2 flex-wrap">
-                <ColorPickerField
-                  label="Kleur"
-                  value={member.color}
-                  onChange={color => handleUpdateMemberField(member.id, { color })}
-                  compact
-                />
-
-                <div>
-                  <label className="block font-semibold text-slate-600 dark:text-slate-400 mb-1">
-                    Emoji
-                  </label>
-                  <select
-                    value={member.avatar}
-                    onChange={e => handleUpdateMemberField(member.id, { avatar: e.target.value })}
-                    className="px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-base"
-                  >
-                    {EMOJI_CHOICES.map(em => (
-                      <option key={em} value={em}>
-                        {em}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </section>
 
-      {/* SECTION 4: Agenda's, Volledige Kleuren & Google OAuth */}
+      {/* SECTION 4: Agenda's, Volledige Kleuren & iCal Feeds */}
       <section className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 sm:p-6 shadow-xs space-y-5">
         <div className="flex items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-3 flex-wrap">
           <div className="flex items-center gap-2.5">
             <Calendar className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
             <div>
               <h2 className="text-base font-bold text-slate-900 dark:text-white">
-                Agenda's, Kleuren & Google OAuth
+                Agenda's, Kleuren & iCal Feeds
               </h2>
               <p className="text-xs text-slate-500">
-                Pas elke agendakleur uit het volledige spectrum aan, voeg lokale agenda's toe of stel je eigen Google Client ID in.
+                Pas elke agendakleur uit het volledige spectrum aan, maak lokale agenda's aan of koppel via iCal.
               </p>
             </div>
           </div>
@@ -784,8 +936,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               onClick={onOpenManageCalendars}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-xs transition-colors"
             >
-              <Globe className="w-3.5 h-3.5" />
-              <span>Google / iCal Koppelen</span>
+              <Link className="w-3.5 h-3.5" />
+              <span>iCal Agenda Koppelen</span>
             </button>
           </div>
         </div>
@@ -868,11 +1020,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     className="font-semibold text-sm text-slate-900 dark:text-white bg-transparent border-b border-transparent focus:border-indigo-400 focus:outline-none w-full"
                   />
                   <div className="text-[11px] text-slate-500 truncate">
-                    {cal.type === 'google_oauth'
-                      ? 'Google Agenda (OAuth)'
-                      : cal.type === 'ical'
-                      ? 'iCal / ICS Feed'
-                      : 'Lokale agenda'}{' '}
+                    {cal.type === 'ical' ? 'iCal / ICS Feed' : 'Lokale agenda'}{' '}
                     {cal.description ? `· ${cal.description}` : ''}
                   </div>
                 </div>
@@ -904,63 +1052,87 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             </div>
           ))}
         </div>
-
-        {/* Custom Google OAuth Client ID & Local URL */}
-        <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/40 space-y-3 text-xs">
-          <div className="font-bold text-sm text-slate-900 dark:text-white flex items-center gap-2">
-            <Globe className="w-4 h-4 text-indigo-500" />
-            <span>Eigen Google OAuth Client ID (voor rechtstreekse Google-login)</span>
-          </div>
-          <p className="text-[11px] text-slate-600 dark:text-slate-400 leading-relaxed">
-            Wil je in je eigen thuisnetwerk direct inloggen via <strong>Google OAuth</strong> (om afspraken vanuit HomeBoard terug te schrijven naar Google Agenda)? Vul hier jouw eigen Google Cloud OAuth 2.0 Client ID in. Voeg het onderstaande adres toe bij <em>Geautoriseerde JavaScript-oorsprongen</em> in Google Cloud Console.
-          </p>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <div>
-              <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                Google OAuth Client ID
-              </label>
-              <input
-                type="text"
-                value={settings.googleClientId || ''}
-                onChange={e => onUpdateSettings({ googleClientId: e.target.value })}
-                placeholder="bijv. 1234567890-abc.apps.googleusercontent.com"
-                className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono text-[11px]"
-              />
-            </div>
-
-            <div>
-              <div className="flex items-center justify-between mb-1">
-                <label className="font-semibold text-slate-700 dark:text-slate-300">
-                  Jouw eigen App-adres (Origin)
-                </label>
-                {currentBrowserOrigin && (
-                  <button
-                    type="button"
-                    onClick={() => onUpdateSettings({ customAppUrl: currentBrowserOrigin })}
-                    className="text-[11px] text-indigo-600 dark:text-indigo-400 hover:underline font-medium"
-                  >
-                    Vul huidig adres in
-                  </button>
-                )}
-              </div>
-              <input
-                type="url"
-                value={settings.customAppUrl || ''}
-                onChange={e => onUpdateSettings({ customAppUrl: e.target.value })}
-                placeholder={currentBrowserOrigin || 'http://localhost:3000'}
-                className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono text-[11px]"
-              />
-            </div>
-          </div>
-
-          <p className="text-[11px] text-slate-500">
-            Let op: Google Cloud Console accepteert voor OAuth <code className="bg-slate-200/70 dark:bg-slate-700 px-1 rounded">http://localhost:3000</code> of een domeinnaam (zoals <code className="bg-slate-200/70 dark:bg-slate-700 px-1 rounded">https://agenda.mijndomein.nl</code> of <code className="bg-slate-200/70 dark:bg-slate-700 px-1 rounded">http://192-168-1-50.sslip.io:3000</code>). Losse IP-adressen zoals <code className="bg-slate-200/70 dark:bg-slate-700 px-1 rounded">192.168.x.x</code> worden door Google OAuth geweigerd — in dat geval werkt de iCal-koppeling wél altijd direct.
-          </p>
-        </div>
       </section>
 
-      {/* SECTION 5: Weergave & Gegevensback-up */}
+      {/* SECTION 5: Wachtwoord wijzigen */}
+      <section className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 sm:p-6 shadow-xs space-y-4">
+        <div className="flex items-center gap-2.5 border-b border-slate-100 dark:border-slate-800 pb-3">
+          <KeyRound className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
+          <div>
+            <h2 className="text-base font-bold text-slate-900 dark:text-white">
+              Instellingen-wachtwoord wijzigen
+            </h2>
+            <p className="text-xs text-slate-500">
+              Pas het wachtwoord aan waarmee de Instellingen vergrendeld zijn.
+            </p>
+          </div>
+        </div>
+
+        {passwordFeedback && (
+          <div
+            className={`p-3 rounded-xl border text-xs flex items-center gap-2 ${
+              passwordFeedback.type === 'ok'
+                ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200'
+                : 'bg-red-50 dark:bg-red-950/40 border-red-200 dark:border-red-900 text-red-700 dark:text-red-300'
+            }`}
+          >
+            {passwordFeedback.type === 'ok' ? (
+              <Check className="w-4 h-4 shrink-0" />
+            ) : (
+              <AlertCircle className="w-4 h-4 shrink-0" />
+            )}
+            <span>{passwordFeedback.msg}</span>
+          </div>
+        )}
+
+        <form onSubmit={handleChangePassword} className="grid grid-cols-1 sm:grid-cols-4 gap-3 items-end text-xs">
+          <div>
+            <label className="block font-semibold text-slate-600 dark:text-slate-400 mb-1">
+              Huidig wachtwoord
+            </label>
+            <input
+              type="password"
+              value={currentPassword}
+              onChange={e => setCurrentPassword(e.target.value)}
+              className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm"
+              required
+            />
+          </div>
+          <div>
+            <label className="block font-semibold text-slate-600 dark:text-slate-400 mb-1">
+              Nieuw wachtwoord
+            </label>
+            <input
+              type="password"
+              value={newPassword}
+              onChange={e => setNewPassword(e.target.value)}
+              className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm"
+              required
+            />
+          </div>
+          <div>
+            <label className="block font-semibold text-slate-600 dark:text-slate-400 mb-1">
+              Bevestig nieuw wachtwoord
+            </label>
+            <input
+              type="password"
+              value={confirmNewPassword}
+              onChange={e => setConfirmNewPassword(e.target.value)}
+              className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm"
+              required
+            />
+          </div>
+          <button
+            type="submit"
+            disabled={isChangingPassword}
+            className="px-4 py-2.5 bg-slate-900 dark:bg-indigo-600 hover:bg-slate-800 dark:hover:bg-indigo-700 text-white font-semibold rounded-lg transition-colors"
+          >
+            {isChangingPassword ? 'Opslaan...' : 'Wachtwoord opslaan'}
+          </button>
+        </form>
+      </section>
+
+      {/* SECTION 6: Weergave & Gegevensback-up */}
       <section className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 sm:p-6 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4 text-xs">
         <div className="space-y-1">
           <div className="font-bold text-sm text-slate-900 dark:text-white flex items-center gap-2">
@@ -968,7 +1140,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             <span>Tijdweergave & Gegevensback-up</span>
           </div>
           <p className="text-slate-500">
-            Bewaar een kopie van je gezinsleden, taken en agenda-instellingen als JSON-bestand.
+            Bewaar een kopie van je gezinsleden, taken, sterrenhistoriek en agenda's als JSON-bestand.
           </p>
         </div>
 

@@ -210,15 +210,17 @@ export const EventModal: React.FC<EventModalProps> = ({
                   onChange={e => setCalendarId(e.target.value)}
                   className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
                 >
-                  {calendars.map(cal => (
-                    <option key={cal.id} value={cal.id}>
-                      {cal.name} {cal.type === 'google_oauth' ? '(Google)' : cal.type === 'ical' ? '(iCal)' : ''}
-                    </option>
-                  ))}
+                  {calendars
+                    .filter(cal => cal.type === 'local' || cal.id === calendarId)
+                    .map(cal => (
+                      <option key={cal.id} value={cal.id}>
+                        {cal.name} {cal.type === 'ical' ? '(Alleen-lezen iCal)' : ''}
+                      </option>
+                    ))}
                 </select>
-                {selectedCalendar?.type === 'google_oauth' && (
-                  <span className="text-[10px] text-indigo-500 mt-1 block">
-                    ✓ Wordt direct gesynchroniseerd met Google Calendar
+                {selectedCalendar?.type === 'ical' && (
+                  <span className="text-[10px] text-amber-500 mt-1 block">
+                    iCal-feeds worden gesynchroniseerd vanuit je externe agenda.
                   </span>
                 )}
               </div>
