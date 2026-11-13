@@ -105,6 +105,7 @@ export interface AppState {
   chores: Chore[];
   choreCompletionsByDate: Record<string, string[]>; // Local YYYY-MM-DD -> completed chore IDs
   starLogs: StarLogEntry[];
+  starLogsReconciled?: boolean;
   generalTasks: GeneralTask[];
   rewards: RewardItem[];
   settings: AppSettings;

@@ -5,10 +5,10 @@ const LOCAL_STORAGE_KEY = 'homeboard_state_v1';
 
 const FALLBACK_DEFAULT_STATE: AppState = {
   familyMembers: [
-    { id: 'fam-1', name: 'Papa', role: 'parent', color: '#3B82F6', avatar: '👨‍💼', stars: 25 },
-    { id: 'fam-2', name: 'Mama', role: 'parent', color: '#EC4899', avatar: '👩‍💼', stars: 30 },
-    { id: 'fam-3', name: 'Lucas', role: 'child', color: '#10B981', avatar: '👦', stars: 14 },
-    { id: 'fam-4', name: 'Emma', role: 'child', color: '#F59E0B', avatar: '👧', stars: 18 }
+    { id: 'fam-1', name: 'Papa', role: 'parent', color: '#3B82F6', avatar: '👨‍💼', stars: 0 },
+    { id: 'fam-2', name: 'Mama', role: 'parent', color: '#EC4899', avatar: '👩‍💼', stars: 0 },
+    { id: 'fam-3', name: 'Lucas', role: 'child', color: '#10B981', avatar: '👦', stars: 0 },
+    { id: 'fam-4', name: 'Emma', role: 'child', color: '#F59E0B', avatar: '👧', stars: 0 }
   ],
   calendars: [
     {
@@ -96,6 +96,7 @@ const FALLBACK_DEFAULT_STATE: AppState = {
   ],
   choreCompletionsByDate: {},
   starLogs: [],
+  starLogsReconciled: true,
   generalTasks: [
     {
       id: 'gt-1',
@@ -116,8 +117,8 @@ const FALLBACK_DEFAULT_STATE: AppState = {
     }
   ],
   rewards: [
-    { id: 'rew-1', title: '1 uur gamen / schermtijd 🎮', starsRequired: 10, claimedCount: 3 },
-    { id: 'rew-2', title: 'Pannenkoeken of pizza kiezen 🍕', starsRequired: 20, claimedCount: 1 },
+    { id: 'rew-1', title: '1 uur gamen / schermtijd 🎮', starsRequired: 10, claimedCount: 0 },
+    { id: 'rew-2', title: 'Pannenkoeken of pizza kiezen 🍕', starsRequired: 20, claimedCount: 0 },
     { id: 'rew-3', title: 'Middagje speeltuin of bioscoop 🍿', starsRequired: 35, claimedCount: 0 }
   ],
   settings: {
@@ -155,12 +156,41 @@ function normalizeState(raw: any): AppState {
     }
   }
 
+  const familyMembers = Array.isArray(raw?.familyMembers)
+    ? raw.familyMembers
+    : FALLBACK_DEFAULT_STATE.familyMembers;
+  const starLogs = Array.isArray(raw?.starLogs) ? [...raw.starLogs] : [];
+
+  if (!raw?.starLogsReconciled) {
+    const todayStr = getLocalDateStr();
+    const nowIso = new Date().toISOString();
+    for (const member of familyMembers) {
+      const loggedSum = starLogs
+        .filter((l: any) => l.memberId === member.id)
+        .reduce((acc: number, l: any) => acc + (Number(l.stars) || 0), 0);
+      const diff = (Number(member.stars) || 0) - loggedSum;
+      if (diff !== 0) {
+        starLogs.push({
+          id: `slog-init-${member.id}`,
+          date: todayStr,
+          timestamp: nowIso,
+          memberId: member.id,
+          title: 'Startsaldo (bij opstart)',
+          stars: diff,
+          type: 'manual_adjustment'
+        });
+      }
+    }
+  }
+
   return {
     ...FALLBACK_DEFAULT_STATE,
     ...raw,
+    familyMembers,
     calendars: rawCalendars.length > 0 ? rawCalendars : FALLBACK_DEFAULT_STATE.calendars,
     choreCompletionsByDate,
-    starLogs: Array.isArray(raw?.starLogs) ? raw.starLogs : [],
+    starLogs,
+    starLogsReconciled: true,
     generalTasks: Array.isArray(raw?.generalTasks)
       ? raw.generalTasks
       : FALLBACK_DEFAULT_STATE.generalTasks,

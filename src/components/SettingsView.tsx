@@ -14,6 +14,7 @@ import {
   uploadMemberAvatar,
   changeSettingsPassword
 } from '../services/storage';
+import { getLocalDateStr, formatLocalDateNL } from '../utils/dateTime';
 import {
   UserPlus,
   Trash2,
@@ -34,14 +35,21 @@ import {
   Minus,
   Check,
   AlertCircle,
-  Link
+  Link,
+  Pencil,
+  History,
+  RotateCcw
 } from 'lucide-react';
 
 interface SettingsViewProps {
   appState: AppState;
   onUpdateSettings: (partial: Partial<AppSettings>) => void;
   onUpdateFamilyMembers: (members: FamilyMember[]) => void;
-  onAdjustMemberStars: (memberId: string, delta: number, reason?: string) => void;
+  onAddFamilyMember: (member: FamilyMember) => void;
+  onAdjustMemberStars: (memberId: string, delta: number, reason?: string, dateStr?: string) => void;
+  onUpdateStarLog: (logId: string, updates: { title: string; stars: number; date: string }) => void;
+  onDeleteStarLog: (logId: string) => void;
+  onClearMemberStars: (memberId: string) => void;
   onUpdateCalendars: (calendars: CalendarSource[]) => void;
   onOpenManageCalendars: () => void;
   onLockSettings: () => void;
@@ -54,13 +62,17 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   appState,
   onUpdateSettings,
   onUpdateFamilyMembers,
+  onAddFamilyMember,
   onAdjustMemberStars,
+  onUpdateStarLog,
+  onDeleteStarLog,
+  onClearMemberStars,
   onUpdateCalendars,
   onOpenManageCalendars,
   onLockSettings,
   onRestoreState
 }) => {
-  const { settings, familyMembers, calendars } = appState;
+  const { settings, familyMembers, calendars, starLogs } = appState;
 
   // Weather search state
   const [cityQuery, setCityQuery] = useState(settings.cityName || '');
@@ -75,6 +87,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [newMemberRole, setNewMemberRole] = useState<'parent' | 'child'>('child');
   const [newMemberColor, setNewMemberColor] = useState('#10B981');
   const [newMemberEmoji, setNewMemberEmoji] = useState('🧑');
+  const [newMemberStartingStars, setNewMemberStartingStars] = useState('0');
   const [newMemberPhotoFile, setNewMemberPhotoFile] = useState<File | null>(null);
   const [newMemberPhotoPreview, setNewMemberPhotoPreview] = useState<string | null>(null);
   const [uploadingMemberId, setUploadingMemberId] = useState<string | null>(null);
@@ -84,6 +97,21 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   // Per-member manual star adjustment input
   const [starReasons, setStarReasons] = useState<Record<string, string>>({});
   const [customStarAmounts, setCustomStarAmounts] = useState<Record<string, string>>({});
+
+  // Star history management section state
+  const [starHistoryMemberFilter, setStarHistoryMemberFilter] = useState<string>('all');
+  const [looseStarMemberId, setLooseStarMemberId] = useState<string>(
+    familyMembers.find(m => m.role === 'child')?.id || familyMembers[0]?.id || ''
+  );
+  const [looseStarMode, setLooseStarMode] = useState<'add' | 'subtract'>('add');
+  const [looseStarAmount, setLooseStarAmount] = useState<string>('2');
+  const [looseStarReason, setLooseStarReason] = useState<string>('');
+  const [looseStarDate, setLooseStarDate] = useState<string>(() => getLocalDateStr());
+  const [editingLogId, setEditingLogId] = useState<string | null>(null);
+  const [editLogTitle, setEditLogTitle] = useState<string>('');
+  const [editLogStars, setEditLogStars] = useState<string>('1');
+  const [editLogDate, setEditLogDate] = useState<string>('');
+  const [confirmClearMemberId, setConfirmClearMemberId] = useState<string | null>(null);
 
   // New local calendar form
   const [isAddingCalendar, setIsAddingCalendar] = useState(false);
@@ -217,6 +245,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       }
     }
 
+    const startingStars = Math.max(0, parseInt(newMemberStartingStars || '0', 10) || 0);
     const newMember: FamilyMember = {
       id,
       name: newMemberName.trim(),
@@ -224,11 +253,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       color: newMemberColor,
       avatar: newMemberEmoji,
       photoUrl,
-      stars: 0
+      stars: startingStars
     };
 
-    onUpdateFamilyMembers([...familyMembers, newMember]);
+    onAddFamilyMember(newMember);
     setNewMemberName('');
+    setNewMemberStartingStars('0');
     setNewMemberPhotoFile(null);
     setNewMemberPhotoPreview(null);
     setIsAddingMember(false);
@@ -241,6 +271,45 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     if (reason) {
       setStarReasons(prev => ({ ...prev, [memberId]: '' }));
     }
+  };
+
+  const handleAddLooseStarsSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const targetId = looseStarMemberId || familyMembers[0]?.id;
+    const amt = Math.abs(parseInt(looseStarAmount || '0', 10) || 0);
+    if (!targetId || amt <= 0) return;
+
+    const delta = looseStarMode === 'add' ? amt : -amt;
+    const defaultReason =
+      looseStarMode === 'add'
+        ? 'Extra sterren toegevoegd (zonder taak)'
+        : 'Sterren afgetrokken';
+
+    onAdjustMemberStars(
+      targetId,
+      delta,
+      looseStarReason.trim() || defaultReason,
+      looseStarDate || getLocalDateStr()
+    );
+    setLooseStarReason('');
+  };
+
+  const startEditingLog = (entry: { id: string; title: string; stars: number; date: string }) => {
+    setEditingLogId(entry.id);
+    setEditLogTitle(entry.title);
+    setEditLogStars(String(entry.stars));
+    setEditLogDate(entry.date);
+  };
+
+  const handleSaveLogEdit = (logId: string) => {
+    const parsedStars = parseInt(editLogStars, 10);
+    if (Number.isNaN(parsedStars)) return;
+    onUpdateStarLog(logId, {
+      title: editLogTitle,
+      stars: parsedStars,
+      date: editLogDate
+    });
+    setEditingLogId(null);
   };
 
   // --- Calendar handlers ---
@@ -568,7 +637,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               </button>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
                 <label className="block font-semibold mb-1">Naam *</label>
                 <input
@@ -590,6 +659,17 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   <option value="child">Kind (taken & sterren sparen)</option>
                   <option value="parent">Ouder / Volwassene</option>
                 </select>
+              </div>
+              <div>
+                <label className="block font-semibold mb-1">Startsterren (optioneel)</label>
+                <input
+                  type="number"
+                  min={0}
+                  max={999}
+                  value={newMemberStartingStars}
+                  onChange={e => setNewMemberStartingStars(e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm font-mono"
+                />
               </div>
             </div>
 
@@ -813,11 +893,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   </div>
                 </div>
 
-                {/* Manual Star Management per Member */}
+                {/* Quick Star Adjustment per Member */}
                 <div className="pt-3 border-t border-slate-200 dark:border-slate-700/70 space-y-2">
                   <div className="flex items-center justify-between">
                     <span className="font-semibold text-slate-700 dark:text-slate-300">
-                      Sterrensaldo aanpassen
+                      Snel sterren bijzetten of aftrekken
                     </span>
                     <span className="inline-flex items-center gap-1 font-mono font-bold text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/60 px-2 py-0.5 rounded-md">
                       <Sparkles className="w-3 h-3 fill-current" />
@@ -831,7 +911,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     onChange={e =>
                       setStarReasons(prev => ({ ...prev, [member.id]: e.target.value }))
                     }
-                    placeholder="Optionele reden (bijv. Goed geholpen, Afspraak niet nagekomen)"
+                    placeholder="Optionele reden (bijv. Flinke dag, Startsaldo, Afspraak niet nagekomen)"
                     className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-[11px] text-slate-800 dark:text-slate-200"
                   />
 
@@ -905,6 +985,342 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             );
           })}
         </div>
+      </section>
+
+      {/* SECTION 3B: Sterrenlijst beheren, aanpassen & verwijderen (enkel na wachtwoord) */}
+      <section className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 sm:p-6 shadow-xs space-y-5">
+        <div className="flex items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-3 flex-wrap">
+          <div className="flex items-center gap-2.5">
+            <History className="w-5 h-5 text-amber-500" />
+            <div>
+              <h2 className="text-base font-bold text-slate-900 dark:text-white">
+                Sterrenlijst beheren & sterren zonder taak toevoegen
+              </h2>
+              <p className="text-xs text-slate-500">
+                Pas bestaande sterren aan, verwijder foute of opstart-sterren, of voeg losse sterren toe (alleen zichtbaar na wachtwoord).
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Add loose stars without a task */}
+        <form
+          onSubmit={handleAddLooseStarsSubmit}
+          className="p-4 rounded-xl border border-amber-200/80 dark:border-amber-900/50 bg-amber-50/40 dark:bg-amber-950/15 space-y-3 text-xs"
+        >
+          <div className="font-bold text-sm text-slate-900 dark:text-white flex items-center gap-1.5">
+            <Sparkles className="w-4 h-4 text-amber-500" />
+            <span>Sterren toevoegen of weghalen zonder taak</span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2.5 items-end">
+            <div>
+              <label className="block font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                Persoon
+              </label>
+              <select
+                value={looseStarMemberId || familyMembers[0]?.id || ''}
+                onChange={e => setLooseStarMemberId(e.target.value)}
+                className="w-full px-2.5 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800"
+              >
+                {familyMembers.map(m => (
+                  <option key={m.id} value={m.id}>
+                    {m.name} ({m.stars}★)
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                Actie & Aantal
+              </label>
+              <div className="flex items-center gap-1">
+                <select
+                  value={looseStarMode}
+                  onChange={e => setLooseStarMode(e.target.value as 'add' | 'subtract')}
+                  className="px-2 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 font-semibold"
+                >
+                  <option value="add">+ Erbij</option>
+                  <option value="subtract">- Eraf</option>
+                </select>
+                <input
+                  type="number"
+                  min={1}
+                  max={500}
+                  value={looseStarAmount}
+                  onChange={e => setLooseStarAmount(e.target.value)}
+                  className="w-full px-2.5 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 font-mono text-center"
+                  required
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                Datum
+              </label>
+              <input
+                type="date"
+                value={looseStarDate}
+                max={getLocalDateStr()}
+                onChange={e => setLooseStarDate(e.target.value)}
+                className="w-full px-2.5 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 font-mono"
+              />
+            </div>
+
+            <div>
+              <label className="block font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                Reden / Omschrijving
+              </label>
+              <input
+                type="text"
+                value={looseStarReason}
+                onChange={e => setLooseStarReason(e.target.value)}
+                placeholder="bijv. Flinke dag!, Startsaldo"
+                className="w-full px-2.5 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800"
+              />
+            </div>
+
+            <button
+              type="submit"
+              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-lg transition-colors"
+            >
+              Sterren toepassen
+            </button>
+          </div>
+        </form>
+
+        {/* Filter by Person + Reset Member to 0 */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs">
+            <button
+              type="button"
+              onClick={() => {
+                setStarHistoryMemberFilter('all');
+                setConfirmClearMemberId(null);
+              }}
+              className={`px-3 py-1.5 rounded-lg font-semibold whitespace-nowrap ${
+                starHistoryMemberFilter === 'all'
+                  ? 'bg-indigo-600 text-white'
+                  : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
+              }`}
+            >
+              Iedereen ({starLogs.length})
+            </button>
+            {familyMembers.map(m => (
+              <button
+                type="button"
+                key={m.id}
+                onClick={() => {
+                  setStarHistoryMemberFilter(m.id);
+                  setConfirmClearMemberId(null);
+                }}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-semibold whitespace-nowrap ${
+                  starHistoryMemberFilter === m.id
+                    ? 'bg-indigo-600 text-white'
+                    : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
+                }`}
+              >
+                <span>{m.name}</span>
+                <span className="font-mono opacity-80">({m.stars}★)</span>
+              </button>
+            ))}
+          </div>
+
+          {starHistoryMemberFilter !== 'all' &&
+            (() => {
+              const selectedMem = familyMembers.find(m => m.id === starHistoryMemberFilter);
+              if (!selectedMem) return null;
+              const hasEntries =
+                selectedMem.stars > 0 ||
+                starLogs.some(l => l.memberId === selectedMem.id);
+              if (!hasEntries) return null;
+
+              return confirmClearMemberId === selectedMem.id ? (
+                <div className="flex items-center gap-1.5 text-xs shrink-0">
+                  <span className="text-red-600 dark:text-red-400 font-semibold">
+                    Zeker saldo op 0 zetten?
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onClearMemberStars(selectedMem.id);
+                      setConfirmClearMemberId(null);
+                    }}
+                    className="px-2.5 py-1 bg-red-600 text-white font-semibold rounded-lg"
+                  >
+                    Ja, wis alles
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setConfirmClearMemberId(null)}
+                    className="px-2.5 py-1 bg-slate-200 dark:bg-slate-700 rounded-lg"
+                  >
+                    Annuleren
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setConfirmClearMemberId(selectedMem.id)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-red-200 dark:border-red-900/60 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 text-xs font-semibold shrink-0"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span>Saldo van {selectedMem.name} naar 0 wissen</span>
+                </button>
+              );
+            })()}
+        </div>
+
+        {/* Editable & Deletable Star History List */}
+        {(() => {
+          const filteredLogs = [...starLogs]
+            .filter(
+              l => starHistoryMemberFilter === 'all' || l.memberId === starHistoryMemberFilter
+            )
+            .sort((a, b) => {
+              if (a.date !== b.date) return b.date.localeCompare(a.date);
+              return new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime();
+            });
+
+          if (filteredLogs.length === 0) {
+            return (
+              <div className="py-8 text-center text-xs text-slate-400 border border-dashed border-slate-200 dark:border-slate-800 rounded-xl">
+                Geen sterren-items gevonden voor deze selectie.
+              </div>
+            );
+          }
+
+          return (
+            <div className="border border-slate-200 dark:border-slate-800 rounded-xl divide-y divide-slate-100 dark:divide-slate-800 max-h-[420px] overflow-y-auto text-xs">
+              {filteredLogs.map(entry => {
+                const mem = familyMembers.find(m => m.id === entry.memberId);
+                const isEditing = editingLogId === entry.id;
+                const timeStr = new Intl.DateTimeFormat('nl-NL', {
+                  hour: '2-digit',
+                  minute: '2-digit'
+                }).format(new Date(entry.timestamp));
+
+                if (isEditing) {
+                  return (
+                    <div
+                      key={entry.id}
+                      className="p-3.5 bg-indigo-50/50 dark:bg-indigo-950/20 flex flex-col sm:flex-row sm:items-center gap-2.5"
+                    >
+                      <div className="flex-1 grid grid-cols-1 sm:grid-cols-3 gap-2">
+                        <input
+                          type="text"
+                          value={editLogTitle}
+                          onChange={e => setEditLogTitle(e.target.value)}
+                          placeholder="Omschrijving / Reden"
+                          className="sm:col-span-1 px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900"
+                        />
+                        <input
+                          type="date"
+                          value={editLogDate}
+                          onChange={e => setEditLogDate(e.target.value)}
+                          className="px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono"
+                        />
+                        <input
+                          type="number"
+                          value={editLogStars}
+                          onChange={e => setEditLogStars(e.target.value)}
+                          className="px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono"
+                          title="Aantal sterren (positief of negatief)"
+                        />
+                      </div>
+
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => handleSaveLogEdit(entry.id)}
+                          className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-semibold"
+                        >
+                          Opslaan
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setEditingLogId(null)}
+                          className="px-3 py-1.5 rounded-lg bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200"
+                        >
+                          Annuleren
+                        </button>
+                      </div>
+                    </div>
+                  );
+                }
+
+                return (
+                  <div
+                    key={entry.id}
+                    className="p-3 flex items-center justify-between gap-3 hover:bg-slate-50/70 dark:hover:bg-slate-800/30"
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      {mem && <MemberAvatar member={mem} size="sm" />}
+                      <div className="min-w-0">
+                        <div className="font-semibold text-slate-900 dark:text-white truncate">
+                          {entry.title}
+                        </div>
+                        <div className="text-[11px] text-slate-500 flex items-center gap-1.5 flex-wrap">
+                          <span className="font-medium text-slate-700 dark:text-slate-300">
+                            {mem?.name || 'Gezinslid'}
+                          </span>
+                          <span>·</span>
+                          <span className="capitalize">
+                            {formatLocalDateNL(entry.date, {
+                              day: 'numeric',
+                              month: 'short',
+                              year: 'numeric'
+                            })}
+                          </span>
+                          <span>·</span>
+                          <span className="font-mono">{timeStr}</span>
+                          <span>·</span>
+                          <span>
+                            {entry.type === 'chore'
+                              ? 'Taak'
+                              : entry.type === 'manual_adjustment'
+                              ? 'Handmatig'
+                              : 'Beloning'}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span
+                        className={`font-mono font-bold text-sm tabular-nums ${
+                          entry.stars >= 0
+                            ? 'text-emerald-600 dark:text-emerald-400'
+                            : 'text-red-500'
+                        }`}
+                      >
+                        {entry.stars >= 0 ? `+${entry.stars}` : entry.stars}★
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => startEditingLog(entry)}
+                        className="p-1.5 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 transition-colors"
+                        title="Dit item aanpassen"
+                      >
+                        <Pencil className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onDeleteStarLog(entry.id)}
+                        className="p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/40 transition-colors"
+                        title="Dit item verwijderen (past saldo aan)"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })()}
       </section>
 
       {/* SECTION 4: Agenda's, Volledige Kleuren & iCal Feeds */}

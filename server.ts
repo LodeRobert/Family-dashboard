@@ -55,10 +55,10 @@ function verifyPasswordHash(password: string, storedHash: string): boolean {
 // Default initial state matching Home-Board style
 const DEFAULT_INITIAL_STATE = {
   familyMembers: [
-    { id: 'fam-1', name: 'Papa', role: 'parent', color: '#3B82F6', avatar: '👨‍💼', stars: 25 },
-    { id: 'fam-2', name: 'Mama', role: 'parent', color: '#EC4899', avatar: '👩‍💼', stars: 30 },
-    { id: 'fam-3', name: 'Lucas', role: 'child', color: '#10B981', avatar: '👦', stars: 14 },
-    { id: 'fam-4', name: 'Emma', role: 'child', color: '#F59E0B', avatar: '👧', stars: 18 }
+    { id: 'fam-1', name: 'Papa', role: 'parent', color: '#3B82F6', avatar: '👨‍💼', stars: 0 },
+    { id: 'fam-2', name: 'Mama', role: 'parent', color: '#EC4899', avatar: '👩‍💼', stars: 0 },
+    { id: 'fam-3', name: 'Lucas', role: 'child', color: '#10B981', avatar: '👦', stars: 0 },
+    { id: 'fam-4', name: 'Emma', role: 'child', color: '#F59E0B', avatar: '👧', stars: 0 }
   ],
   calendars: [
     {
@@ -181,6 +181,7 @@ const DEFAULT_INITIAL_STATE = {
   ],
   choreCompletionsByDate: {} as Record<string, string[]>,
   starLogs: [] as any[],
+  starLogsReconciled: true,
   generalTasks: [
     {
       id: 'gt-1',
@@ -201,8 +202,8 @@ const DEFAULT_INITIAL_STATE = {
     }
   ],
   rewards: [
-    { id: 'rew-1', title: '1 uur gamen / schermtijd 🎮', starsRequired: 10, claimedCount: 3 },
-    { id: 'rew-2', title: 'Pannenkoeken of pizza kiezen 🍕', starsRequired: 20, claimedCount: 1 },
+    { id: 'rew-1', title: '1 uur gamen / schermtijd 🎮', starsRequired: 10, claimedCount: 0 },
+    { id: 'rew-2', title: 'Pannenkoeken of pizza kiezen 🍕', starsRequired: 20, claimedCount: 0 },
     { id: 'rew-3', title: 'Middagje speeltuin of bioscoop 🍿', starsRequired: 35, claimedCount: 0 }
   ],
   settings: {
@@ -253,12 +254,41 @@ function getRawStoredData(): any {
       }
     }
 
+    // One-time migration: convert any untracked legacy member stars into explicit editable StarLogEntry items
+    const familyMembers = Array.isArray(parsed.familyMembers)
+      ? parsed.familyMembers
+      : DEFAULT_INITIAL_STATE.familyMembers;
+    let starLogs = Array.isArray(parsed.starLogs) ? [...parsed.starLogs] : [];
+    if (!parsed.starLogsReconciled) {
+      const todayStr = getLocalTodayStr();
+      const nowIso = new Date().toISOString();
+      for (const member of familyMembers) {
+        const loggedSum = starLogs
+          .filter((l: any) => l.memberId === member.id)
+          .reduce((acc: number, l: any) => acc + (Number(l.stars) || 0), 0);
+        const diff = (Number(member.stars) || 0) - loggedSum;
+        if (diff !== 0) {
+          starLogs.push({
+            id: `slog-init-${member.id}`,
+            date: todayStr,
+            timestamp: nowIso,
+            memberId: member.id,
+            title: 'Startsaldo (bij opstart)',
+            stars: diff,
+            type: 'manual_adjustment'
+          });
+        }
+      }
+    }
+
     return {
       ...DEFAULT_INITIAL_STATE,
       ...parsed,
+      familyMembers,
       calendars,
       choreCompletionsByDate,
-      starLogs: Array.isArray(parsed.starLogs) ? parsed.starLogs : [],
+      starLogs,
+      starLogsReconciled: true,
       generalTasks: Array.isArray(parsed.generalTasks)
         ? parsed.generalTasks
         : DEFAULT_INITIAL_STATE.generalTasks,

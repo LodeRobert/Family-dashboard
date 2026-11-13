@@ -1,6 +1,6 @@
 # 🏠 HomeBoard - Slim Familie Dashboard & Gezinsplanner
 
-> Een privacy-vriendelijk, 100% gratis te hosten digitaal familiedashboard en interactieve agendaplanner geïnspireerd op **Home-Board.nl**. Geoptimaliseerd voor wandtablets aan de muur, smartphones (GSM), tablets en laptops met directe Google Agenda integratie en Docker Compose ondersteuning.
+> Een privacy-vriendelijk, 100% gratis te hosten digitaal familiedashboard en interactieve agendaplanner geïnspireerd op **Home-Board.nl**. Geoptimaliseerd voor wandtablets aan de muur, smartphones (GSM), tablets en laptops met iCal-agenda koppeling en Docker Compose ondersteuning.
 
 ---
 
@@ -11,11 +11,11 @@
   - **Volledig kleurenspectrum**: Kies voor elke lokale of iCal-agenda een eigen kleur uit het volledige kleurenspectrum en maak onbeperkt lokale agenda's aan.
   - **Agenda's koppelen via iCal**: Koppel eenvoudig elke Google-, Apple- of Outlook-agenda via de geheime iCal-link (`.ics`) — werkt op elk lokaal netwerk zonder cloud-account.
   - **Afspraken toevoegen & bewerken**: Voeg eenvoudig lokale afspraken toe met titel, datum, tijden, gekoppeld gezinslid, locatie en beschrijving.
-- ⭐ **Takenbord, Sterren-agenda & Algemene Taken**:
+- ⭐ **Takenbord, Sterrenlijst & Algemene Taken**:
   - **Dagroutines op moment van de dag**: Taken voor **Ochtend** (00:00–12:00), **Middag** (12:00–18:00), **Avond** (18:00–00:00) of **Hele dag** (altijd af te vinken). Elke dag start automatisch om **00:00** opnieuw, en voorbije dagen blijven achteraf aanpasbaar.
-  - **Sterren-agenda & Historiek**: Maandoverzicht waarop je per dag precies ziet wie welke sterren verdiend of ingewisseld heeft.
+  - **Sterrenlijst & Historiek**: Overzichtelijke lijstweergave per persoon waarop je precies ziet wanneer en door welke taak of reden sterren zijn behaald, aangepast of ingewisseld.
   - **Algemene Taken**: Volledig ingebouwde takenlijsten (zoals *Algemeen*, *Boodschappen*, *Klusjes*) ter vervanging van Google Tasks.
-  - **Wachtwoordbeveiligde Instellingen**: Stel bij het opstarten een wachtwoord in; pas alleen met wachtwoord het gezin, sterrensaldo's (toevoegen/aftrekken) en profielfoto's (`data/avatars/`) aan.
+  - **Wachtwoordbeveiligde Instellingen**: Stel bij het opstarten een wachtwoord in; pas alleen na het wachtwoord het gezin, losse sterren (zonder taak toevoegen, aanpassen, verwijderen of op 0 zetten) en profielfoto's (`data/avatars/`) aan.
 - 🕒 **Aanpasbare Begroeting, Live Klok & Lokaal Weer**:
   - Kies in **Instellingen** zelf de naam van je bord en of je wel of geen familienaam/huishoudnaam in de begroeting toont.
   - Kies je eigen **woonplaats** voor automatisch live weer (via Open-Meteo, zonder API-key).

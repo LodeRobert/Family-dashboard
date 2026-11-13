@@ -217,11 +217,41 @@ export default function App() {
     updateStateAndPersist(prev => ({
       ...prev,
       familyMembers: members,
-      chores: prev.chores.filter(c => validIds.has(c.memberId))
+      chores: prev.chores.filter(c => validIds.has(c.memberId)),
+      starLogs: prev.starLogs.filter(l => validIds.has(l.memberId))
     }));
   };
 
-  const handleAdjustMemberStars = (memberId: string, delta: number, reason?: string) => {
+  const handleAddFamilyMember = (member: FamilyMember) => {
+    updateStateAndPersist(prev => {
+      const initialStars = Math.max(0, Math.round(member.stars || 0));
+      const newMember: FamilyMember = { ...member, stars: initialStars };
+      const nextLogs = [...prev.starLogs];
+      if (initialStars > 0) {
+        nextLogs.push({
+          id: 'slog-' + Math.random().toString(36).substring(2, 9),
+          date: getLocalDateStr(),
+          timestamp: new Date().toISOString(),
+          memberId: newMember.id,
+          title: 'Startsaldo bij aanmaken',
+          stars: initialStars,
+          type: 'manual_adjustment'
+        });
+      }
+      return {
+        ...prev,
+        familyMembers: [...prev.familyMembers, newMember],
+        starLogs: nextLogs
+      };
+    });
+  };
+
+  const handleAdjustMemberStars = (
+    memberId: string,
+    delta: number,
+    reason?: string,
+    dateStr?: string
+  ) => {
     if (!delta) return;
     updateStateAndPersist(prev => {
       const target = prev.familyMembers.find(m => m.id === memberId);
@@ -231,9 +261,10 @@ export default function App() {
       const actualDelta = nextStars - target.stars;
       if (actualDelta === 0) return prev;
 
+      const targetDate = dateStr || getLocalDateStr();
       const logEntry: StarLogEntry = {
         id: 'slog-' + Math.random().toString(36).substring(2, 9),
-        date: getLocalDateStr(),
+        date: targetDate,
         timestamp: new Date().toISOString(),
         memberId,
         title:
@@ -249,6 +280,92 @@ export default function App() {
           m.id === memberId ? { ...m, stars: nextStars } : m
         ),
         starLogs: [...prev.starLogs, logEntry]
+      };
+    });
+  };
+
+  const handleUpdateStarLog = (
+    logId: string,
+    updates: { title: string; stars: number; date: string }
+  ) => {
+    updateStateAndPersist(prev => {
+      const existing = prev.starLogs.find(l => l.id === logId);
+      if (!existing) return prev;
+
+      const newStars = Number(updates.stars);
+      if (Number.isNaN(newStars)) return prev;
+
+      const diff = newStars - existing.stars;
+
+      return {
+        ...prev,
+        familyMembers: prev.familyMembers.map(m =>
+          m.id === existing.memberId
+            ? { ...m, stars: Math.max(0, m.stars + diff) }
+            : m
+        ),
+        starLogs: prev.starLogs.map(l =>
+          l.id === logId
+            ? {
+                ...l,
+                title: updates.title.trim() || l.title,
+                stars: newStars,
+                date: updates.date || l.date
+              }
+            : l
+        )
+      };
+    });
+  };
+
+  const handleDeleteStarLog = (logId: string) => {
+    updateStateAndPersist(prev => {
+      const existing = prev.starLogs.find(l => l.id === logId);
+      if (!existing) return prev;
+
+      let nextCompletions = prev.choreCompletionsByDate;
+      if (existing.type === 'chore' && existing.choreId && prev.choreCompletionsByDate[existing.date]) {
+        nextCompletions = {
+          ...prev.choreCompletionsByDate,
+          [existing.date]: prev.choreCompletionsByDate[existing.date].filter(
+            id => id !== existing.choreId
+          )
+        };
+      }
+
+      return {
+        ...prev,
+        choreCompletionsByDate: nextCompletions,
+        familyMembers: prev.familyMembers.map(m =>
+          m.id === existing.memberId
+            ? { ...m, stars: Math.max(0, m.stars - existing.stars) }
+            : m
+        ),
+        starLogs: prev.starLogs.filter(l => l.id !== logId)
+      };
+    });
+  };
+
+  const handleClearMemberStars = (memberId: string) => {
+    updateStateAndPersist(prev => {
+      const memberChoreIds = new Set(
+        prev.chores.filter(c => c.memberId === memberId).map(c => c.id)
+      );
+      const nextCompletions: Record<string, string[]> = {};
+      for (const [d, ids] of Object.entries(prev.choreCompletionsByDate)) {
+        const filtered = ids.filter(id => !memberChoreIds.has(id));
+        if (filtered.length > 0) {
+          nextCompletions[d] = filtered;
+        }
+      }
+
+      return {
+        ...prev,
+        choreCompletionsByDate: nextCompletions,
+        familyMembers: prev.familyMembers.map(m =>
+          m.id === memberId ? { ...m, stars: 0 } : m
+        ),
+        starLogs: prev.starLogs.filter(l => l.memberId !== memberId)
       };
     });
   };
@@ -695,6 +812,7 @@ export default function App() {
             onToggleGeneralTask={handleToggleGeneralTask}
             onDeleteGeneralTask={handleDeleteGeneralTask}
             onClearCompletedGeneralTasks={handleClearCompletedGeneralTasks}
+            onNavigateToSettings={() => setCurrentTab('settings')}
           />
         )}
 
@@ -706,7 +824,11 @@ export default function App() {
               appState={appState}
               onUpdateSettings={handleUpdateSettings}
               onUpdateFamilyMembers={handleUpdateFamilyMembers}
+              onAddFamilyMember={handleAddFamilyMember}
               onAdjustMemberStars={handleAdjustMemberStars}
+              onUpdateStarLog={handleUpdateStarLog}
+              onDeleteStarLog={handleDeleteStarLog}
+              onClearMemberStars={handleClearMemberStars}
               onUpdateCalendars={handleUpdateCalendars}
               onOpenManageCalendars={() => setIsManageCalendarsOpen(true)}
               onLockSettings={() => setIsSettingsUnlocked(false)}

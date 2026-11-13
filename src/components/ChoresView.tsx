@@ -28,14 +28,14 @@ import {
   Moon,
   Trash2,
   Trophy,
-  CalendarDays,
   ListTodo,
   Clock,
   Lock,
   ChevronLeft,
   ChevronRight,
   History,
-  CheckSquare
+  CheckSquare,
+  List
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
@@ -56,9 +56,10 @@ interface ChoresViewProps {
   onToggleGeneralTask: (taskId: string) => void;
   onDeleteGeneralTask: (taskId: string) => void;
   onClearCompletedGeneralTasks: () => void;
+  onNavigateToSettings?: () => void;
 }
 
-type ChoresSubTab = 'routines' | 'star_calendar' | 'general_tasks';
+type ChoresSubTab = 'routines' | 'star_list' | 'general_tasks';
 
 export const ChoresView: React.FC<ChoresViewProps> = ({
   chores,
@@ -76,7 +77,8 @@ export const ChoresView: React.FC<ChoresViewProps> = ({
   onAddGeneralTask,
   onToggleGeneralTask,
   onDeleteGeneralTask,
-  onClearCompletedGeneralTasks
+  onClearCompletedGeneralTasks,
+  onNavigateToSettings
 }) => {
   const [subTab, setSubTab] = useState<ChoresSubTab>('routines');
   const [selectedMemberId, setSelectedMemberId] = useState<string>(
@@ -101,10 +103,9 @@ export const ChoresView: React.FC<ChoresViewProps> = ({
   const [newRewardTitle, setNewRewardTitle] = useState('');
   const [newRewardStars, setNewRewardStars] = useState(10);
 
-  // Star Calendar state
-  const [calendarMonth, setCalendarMonth] = useState<Date>(() => new Date());
-  const [calendarSelectedDate, setCalendarSelectedDate] = useState<string>(todayStr);
-  const [calendarMemberFilter, setCalendarMemberFilter] = useState<string>('all');
+  // Star list state
+  const [starListMemberFilter, setStarListMemberFilter] = useState<string>('all');
+  const [starListTypeFilter, setStarListTypeFilter] = useState<'all' | 'chore' | 'manual_adjustment' | 'reward_claim'>('all');
 
   // General Tasks state (Google Tasks replacement)
   const [selectedListFilter, setSelectedListFilter] = useState<string>('ALL');
@@ -126,7 +127,6 @@ export const ChoresView: React.FC<ChoresViewProps> = ({
   useEffect(() => {
     const yesterdayStr = shiftLocalDateStr(todayStr, -1);
     setSelectedDateStr(prev => (prev === yesterdayStr ? todayStr : prev));
-    setCalendarSelectedDate(prev => (prev === yesterdayStr ? todayStr : prev));
   }, [todayStr]);
 
   useEffect(() => {
@@ -217,44 +217,24 @@ export const ChoresView: React.FC<ChoresViewProps> = ({
     onClaimReward(reward.id, selectedMember.id);
   };
 
-  // --- Star Calendar helpers ---
-  const filteredStarLogs =
-    calendarMemberFilter === 'all'
-      ? starLogs
-      : starLogs.filter(l => l.memberId === calendarMemberFilter);
+  // --- Star List helpers ---
+  const filteredStarLogs = starLogs
+    .filter(l => starListMemberFilter === 'all' || l.memberId === starListMemberFilter)
+    .filter(l => starListTypeFilter === 'all' || l.type === starListTypeFilter)
+    .sort((a, b) => {
+      if (a.date !== b.date) return b.date.localeCompare(a.date);
+      return new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime();
+    });
 
-  const getCalendarDaysForMonth = () => {
-    const year = calendarMonth.getFullYear();
-    const month = calendarMonth.getMonth();
-    const firstDayOfMonth = new Date(year, month, 1);
-    const lastDayOfMonth = new Date(year, month + 1, 0);
-    const totalDays = lastDayOfMonth.getDate();
-
-    let startDayOfWeek = firstDayOfMonth.getDay() - 1;
-    if (startDayOfWeek === -1) startDayOfWeek = 6;
-
-    const days: { date: Date; isCurrentMonth: boolean; dateStr: string }[] = [];
-    const prevMonthLastDay = new Date(year, month, 0).getDate();
-
-    for (let i = startDayOfWeek - 1; i >= 0; i--) {
-      const d = new Date(year, month - 1, prevMonthLastDay - i);
-      days.push({ date: d, isCurrentMonth: false, dateStr: getLocalDateStr(d) });
-    }
-    for (let i = 1; i <= totalDays; i++) {
-      const d = new Date(year, month, i);
-      days.push({ date: d, isCurrentMonth: true, dateStr: getLocalDateStr(d) });
-    }
-    const remaining = (7 - (days.length % 7)) % 7;
-    for (let i = 1; i <= remaining; i++) {
-      const d = new Date(year, month + 1, i);
-      days.push({ date: d, isCurrentMonth: false, dateStr: getLocalDateStr(d) });
-    }
-    return days;
-  };
-
-  const selectedDayStarLogs = filteredStarLogs
-    .filter(l => l.date === calendarSelectedDate)
-    .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+  const groupedStarLogsByDate = filteredStarLogs.reduce<Record<string, StarLogEntry[]>>(
+    (acc, entry) => {
+      if (!acc[entry.date]) acc[entry.date] = [];
+      acc[entry.date].push(entry);
+      return acc;
+    },
+    {}
+  );
+  const starLogDatesDesc = Object.keys(groupedStarLogsByDate).sort((a, b) => b.localeCompare(a));
 
   // --- General Tasks helpers ---
   const uniqueTaskLists = Array.from(
@@ -431,15 +411,15 @@ export const ChoresView: React.FC<ChoresViewProps> = ({
 
         <button
           type="button"
-          onClick={() => setSubTab('star_calendar')}
+          onClick={() => setSubTab('star_list')}
           className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-semibold transition-all whitespace-nowrap ${
-            subTab === 'star_calendar'
+            subTab === 'star_list'
               ? 'bg-indigo-600 text-white shadow-xs'
               : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
           }`}
         >
-          <CalendarDays className="w-4 h-4" />
-          <span>Sterren-agenda & Historiek</span>
+          <List className="w-4 h-4" />
+          <span>Sterrenlijst & Historiek</span>
         </button>
 
         <button
@@ -559,7 +539,7 @@ export const ChoresView: React.FC<ChoresViewProps> = ({
                   <span className="capitalize font-semibold">
                     {formatLocalDateNL(selectedDateStr)}
                   </span>
-                  ). Vinkjes hier passen het totale sterrensaldo en de sterren-agenda direct aan.
+                  ). Vinkjes hier passen het totale sterrensaldo en de sterrenlijst direct aan.
                 </span>
               </div>
               <button
@@ -726,223 +706,216 @@ export const ChoresView: React.FC<ChoresViewProps> = ({
       )}
 
       {/* ===================================================================== */}
-      {/* SUB-TAB 2: STERREN-AGENDA & HISTORIEK                                 */}
+      {/* SUB-TAB 2: STERRENLIJST & HISTORIEK (Per persoon, lijstweergave)      */}
       {/* ===================================================================== */}
-      {subTab === 'star_calendar' && (
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
-          {/* Left: Monthly Star Calendar */}
-          <div className="lg:col-span-8 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-4 sm:p-5 shadow-xs space-y-4">
+      {subTab === 'star_list' && (
+        <div className="space-y-5">
+          {/* Top Member Filter Cards + Link to Password-Protected Settings */}
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-4 sm:p-5 shadow-xs space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() =>
-                    setCalendarMonth(
-                      prev => new Date(prev.getFullYear(), prev.getMonth() - 1, 1)
-                    )
-                  }
-                  className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800"
-                >
-                  <ChevronLeft className="w-4 h-4" />
-                </button>
-                <h3 className="text-base sm:text-lg font-bold text-slate-900 dark:text-white capitalize min-w-[150px] text-center">
-                  {new Intl.DateTimeFormat('nl-NL', { month: 'long', year: 'numeric' }).format(
-                    calendarMonth
-                  )}
-                </h3>
-                <button
-                  type="button"
-                  onClick={() =>
-                    setCalendarMonth(
-                      prev => new Date(prev.getFullYear(), prev.getMonth() + 1, 1)
-                    )
-                  }
-                  className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800"
-                >
-                  <ChevronRight className="w-4 h-4" />
-                </button>
-              </div>
-
-              <select
-                value={calendarMemberFilter}
-                onChange={e => setCalendarMemberFilter(e.target.value)}
-                className="px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs font-semibold"
-              >
-                <option value="all">Alle gezinsleden</option>
-                {familyMembers.map(m => (
-                  <option key={m.id} value={m.id}>
-                    {m.name} ({m.stars}★)
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
-              <div className="grid grid-cols-7 bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-800 text-center py-2 text-[11px] font-semibold text-slate-500">
-                <div>Ma</div>
-                <div>Di</div>
-                <div>Wo</div>
-                <div>Do</div>
-                <div>Vr</div>
-                <div>Za</div>
-                <div>Zo</div>
-              </div>
-
-              <div className="grid grid-cols-7 divide-x divide-y divide-slate-100 dark:divide-slate-800">
-                {getCalendarDaysForMonth().map((dayObj, idx) => {
-                  const dayLogs = filteredStarLogs.filter(l => l.date === dayObj.dateStr);
-                  // Sum stars per member on this day
-                  const perMemberTotals = new Map<string, number>();
-                  for (const entry of dayLogs) {
-                    perMemberTotals.set(
-                      entry.memberId,
-                      (perMemberTotals.get(entry.memberId) || 0) + entry.stars
-                    );
-                  }
-
-                  const isSelected = calendarSelectedDate === dayObj.dateStr;
-                  const isToday = dayObj.dateStr === todayStr;
-
-                  return (
-                    <button
-                      type="button"
-                      key={idx}
-                      onClick={() => setCalendarSelectedDate(dayObj.dateStr)}
-                      className={`min-h-[72px] sm:min-h-[92px] p-1.5 text-left flex flex-col justify-between transition-colors ${
-                        isSelected
-                          ? 'bg-indigo-50/90 dark:bg-indigo-950/50 ring-2 ring-inset ring-indigo-500'
-                          : !dayObj.isCurrentMonth
-                          ? 'bg-slate-50/60 dark:bg-slate-950/40 text-slate-400'
-                          : 'hover:bg-slate-50 dark:hover:bg-slate-800/40'
-                      }`}
-                    >
-                      <span
-                        className={`text-xs font-bold font-mono tabular-nums inline-flex items-center justify-center w-6 h-6 rounded-full ${
-                          isToday
-                            ? 'bg-indigo-600 text-white'
-                            : 'text-slate-700 dark:text-slate-300'
-                        }`}
-                      >
-                        {dayObj.date.getDate()}
-                      </span>
-
-                      <div className="space-y-0.5 w-full mt-1">
-                        {Array.from(perMemberTotals.entries())
-                          .slice(0, 3)
-                          .map(([mId, total]) => {
-                            const mem = familyMembers.find(m => m.id === mId);
-                            if (!mem) return null;
-                            return (
-                              <div
-                                key={mId}
-                                className="flex items-center justify-between gap-1 text-[10px] px-1 py-0.5 rounded bg-white/90 dark:bg-slate-800/90 border border-slate-200/70 dark:border-slate-700 truncate"
-                              >
-                                <span
-                                  className="w-1.5 h-1.5 rounded-full shrink-0"
-                                  style={{ backgroundColor: mem.color }}
-                                />
-                                <span className="truncate font-medium text-slate-700 dark:text-slate-300 hidden sm:inline">
-                                  {mem.name}
-                                </span>
-                                <span
-                                  className={`font-mono font-bold shrink-0 ${
-                                    total >= 0 ? 'text-amber-600 dark:text-amber-400' : 'text-red-500'
-                                  }`}
-                                >
-                                  {total >= 0 ? `+${total}` : total}★
-                                </span>
-                              </div>
-                            );
-                          })}
-                        {perMemberTotals.size > 3 && (
-                          <div className="text-[9px] text-slate-400 font-mono">
-                            +{perMemberTotals.size - 3} meer
-                          </div>
-                        )}
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
-
-          {/* Right: Selected Day Star Log Details */}
-          <div className="lg:col-span-4 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 shadow-xs space-y-4">
-            <div className="flex items-start justify-between gap-2 border-b border-slate-100 dark:border-slate-800 pb-3">
               <div>
-                <h3 className="text-base font-bold text-slate-900 dark:text-white capitalize">
-                  {formatLocalDateNL(calendarSelectedDate)}
+                <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                  <Sparkles className="w-5 h-5 text-amber-500" />
+                  <span>Opvolging van behaalde sterren</span>
                 </h3>
-                <p className="text-xs text-slate-500">
-                  Overzicht van behaalde & aangepaste sterren
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Bekijk per persoon wanneer en door welke taak of reden sterren zijn behaald, aangepast of ingewisseld.
                 </p>
               </div>
-              {calendarSelectedDate <= todayStr && (
+
+              {onNavigateToSettings && (
                 <button
                   type="button"
-                  onClick={() => {
-                    setSelectedDateStr(calendarSelectedDate);
-                    setSubTab('routines');
-                  }}
-                  className="px-2.5 py-1.5 text-[11px] font-semibold bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 rounded-lg shrink-0"
+                  onClick={onNavigateToSettings}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 shrink-0 transition-colors"
                 >
-                  Dag aanpassen
+                  <Lock className="w-3.5 h-3.5 text-amber-500" />
+                  <span>Sterren aanpassen of verwijderen</span>
                 </button>
               )}
             </div>
 
-            {selectedDayStarLogs.length === 0 ? (
-              <div className="py-10 text-center space-y-2 text-xs text-slate-400">
-                <Sparkles className="w-7 h-7 mx-auto text-slate-300 dark:text-slate-700" />
-                <p>Op deze dag zijn geen sterren geregistreerd.</p>
-              </div>
-            ) : (
-              <div className="space-y-2.5 max-h-[460px] overflow-y-auto pr-1">
-                {selectedDayStarLogs.map(entry => {
-                  const mem = familyMembers.find(m => m.id === entry.memberId);
-                  const timeStr = new Intl.DateTimeFormat('nl-NL', {
-                    hour: '2-digit',
-                    minute: '2-digit'
-                  }).format(new Date(entry.timestamp));
+            {/* Clickable Member Filter Chips */}
+            <div className="flex items-center gap-2 overflow-x-auto pb-1">
+              <button
+                type="button"
+                onClick={() => setStarListMemberFilter('all')}
+                className={`px-3.5 py-2 rounded-xl border text-xs font-semibold shrink-0 transition-all ${
+                  starListMemberFilter === 'all'
+                    ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
+                    : 'bg-slate-50 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100'
+                }`}
+              >
+                Iedereen ({starLogs.length})
+              </button>
 
-                  return (
-                    <div
-                      key={entry.id}
-                      className="p-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-800/40 flex items-center justify-between gap-3 text-xs"
-                    >
-                      <div className="flex items-center gap-2.5 min-w-0">
-                        {mem && <MemberAvatar member={mem} size="sm" />}
-                        <div className="min-w-0">
-                          <div className="font-semibold text-slate-900 dark:text-white truncate">
-                            {entry.title}
-                          </div>
-                          <div className="text-[11px] text-slate-500">
-                            {mem?.name || 'Gezinslid'} · {timeStr} ·{' '}
-                            {entry.type === 'chore'
-                              ? 'Taak'
-                              : entry.type === 'manual_adjustment'
-                              ? 'Instellingen'
-                              : 'Beloning'}
-                          </div>
-                        </div>
+              {familyMembers.map(m => {
+                const isSelected = starListMemberFilter === m.id;
+                const count = starLogs.filter(l => l.memberId === m.id).length;
+                return (
+                  <button
+                    type="button"
+                    key={m.id}
+                    onClick={() => setStarListMemberFilter(m.id)}
+                    className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs shrink-0 transition-all ${
+                      isSelected
+                        ? 'bg-indigo-50 dark:bg-indigo-950/60 border-indigo-400 dark:border-indigo-700 shadow-xs'
+                        : 'bg-slate-50 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800'
+                    }`}
+                  >
+                    <MemberAvatar member={m} size="sm" />
+                    <div className="text-left">
+                      <div className="font-bold text-slate-900 dark:text-white leading-tight">
+                        {m.name}
+                      </div>
+                      <div className="text-[11px] font-mono tabular-nums text-amber-600 dark:text-amber-400 font-semibold">
+                        {m.stars}★ · {count} items
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Category filter strip */}
+            <div className="flex items-center gap-1.5 flex-wrap pt-1 border-t border-slate-100 dark:border-slate-800 text-xs">
+              <span className="text-slate-400 mr-1 font-medium">Filter:</span>
+              {[
+                { key: 'all', label: 'Alles' },
+                { key: 'chore', label: 'Door taken' },
+                { key: 'manual_adjustment', label: 'Handmatig / Startsaldo' },
+                { key: 'reward_claim', label: 'Beloningen' }
+              ].map(tab => (
+                <button
+                  key={tab.key}
+                  type="button"
+                  onClick={() =>
+                    setStarListTypeFilter(
+                      tab.key as 'all' | 'chore' | 'manual_adjustment' | 'reward_claim'
+                    )
+                  }
+                  className={`px-2.5 py-1 rounded-lg font-medium transition-colors ${
+                    starListTypeFilter === tab.key
+                      ? 'bg-slate-900 dark:bg-indigo-600 text-white'
+                      : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Chronological Star List Grouped by Date */}
+          {starLogDatesDesc.length === 0 ? (
+            <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-10 text-center space-y-2 text-xs text-slate-400 shadow-xs">
+              <Sparkles className="w-8 h-8 mx-auto text-slate-300 dark:text-slate-700" />
+              <p className="font-semibold text-slate-600 dark:text-slate-300">
+                Nog geen sterren-historiek voor deze selectie.
+              </p>
+              <p>
+                Vink een taak af of voeg handmatig sterren toe via Instellingen.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {starLogDatesDesc.map(dateStr => {
+                const dayEntries = groupedStarLogsByDate[dateStr];
+                const dayNet = dayEntries.reduce((sum, e) => sum + e.stars, 0);
+                const isToday = dateStr === todayStr;
+                const isYesterday = dateStr === shiftLocalDateStr(todayStr, -1);
+
+                return (
+                  <div
+                    key={dateStr}
+                    className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-xs"
+                  >
+                    <div className="px-4 sm:px-5 py-3 bg-slate-50/80 dark:bg-slate-800/50 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <History className="w-4 h-4 text-indigo-500" />
+                        <span className="font-bold text-xs sm:text-sm text-slate-900 dark:text-white capitalize">
+                          {isToday
+                            ? `Vandaag · ${formatLocalDateNL(dateStr)}`
+                            : isYesterday
+                            ? `Gisteren · ${formatLocalDateNL(dateStr)}`
+                            : formatLocalDateNL(dateStr)}
+                        </span>
                       </div>
 
                       <span
-                        className={`font-mono font-bold text-sm shrink-0 ${
-                          entry.stars >= 0
-                            ? 'text-emerald-600 dark:text-emerald-400'
-                            : 'text-red-500'
+                        className={`text-xs font-mono font-bold px-2.5 py-0.5 rounded-md ${
+                          dayNet >= 0
+                            ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300'
+                            : 'bg-red-50 dark:bg-red-950/60 text-red-600 dark:text-red-300'
                         }`}
                       >
-                        {entry.stars >= 0 ? `+${entry.stars}` : entry.stars}★
+                        {dayNet >= 0 ? `+${dayNet}` : dayNet}★ op deze dag
                       </span>
                     </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
+
+                    <div className="divide-y divide-slate-100 dark:divide-slate-800">
+                      {dayEntries.map(entry => {
+                        const mem = familyMembers.find(m => m.id === entry.memberId);
+                        const timeStr = new Intl.DateTimeFormat('nl-NL', {
+                          hour: '2-digit',
+                          minute: '2-digit'
+                        }).format(new Date(entry.timestamp));
+
+                        return (
+                          <div
+                            key={entry.id}
+                            className="px-4 sm:px-5 py-3 flex items-center justify-between gap-3 text-xs hover:bg-slate-50/60 dark:hover:bg-slate-800/30 transition-colors"
+                          >
+                            <div className="flex items-center gap-3 min-w-0">
+                              {mem && <MemberAvatar member={mem} size="md" />}
+                              <div className="min-w-0">
+                                <div className="font-semibold text-sm text-slate-900 dark:text-white truncate">
+                                  {entry.title}
+                                </div>
+                                <div className="flex items-center gap-2 flex-wrap text-[11px] text-slate-500 mt-0.5">
+                                  <span className="font-semibold text-slate-700 dark:text-slate-300">
+                                    {mem?.name || 'Gezinslid'}
+                                  </span>
+                                  <span>·</span>
+                                  <span className="font-mono">{timeStr}</span>
+                                  <span>·</span>
+                                  <span
+                                    className={`px-1.5 py-0.5 rounded font-medium ${
+                                      entry.type === 'chore'
+                                        ? 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300'
+                                        : entry.type === 'manual_adjustment'
+                                        ? 'bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300'
+                                        : 'bg-purple-50 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300'
+                                    }`}
+                                  >
+                                    {entry.type === 'chore'
+                                      ? 'Taak'
+                                      : entry.type === 'manual_adjustment'
+                                      ? 'Handmatig / Zonder taak'
+                                      : 'Beloning'}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+
+                            <span
+                              className={`font-mono font-bold text-sm sm:text-base shrink-0 tabular-nums ${
+                                entry.stars >= 0
+                                  ? 'text-emerald-600 dark:text-emerald-400'
+                                  : 'text-red-500'
+                              }`}
+                            >
+                              {entry.stars >= 0 ? `+${entry.stars}` : entry.stars}★
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 
