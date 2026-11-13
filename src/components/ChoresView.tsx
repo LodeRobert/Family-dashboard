@@ -12,8 +12,11 @@ import {
   formatLocalDateNL,
   getCurrentDayPeriod,
   isChorePeriodActiveNow,
+  isChoreActiveAtTime,
   getChorePeriodLabel,
   getChorePeriodTimeRange,
+  getChoreEffectiveTimeRange,
+  hasCustomChoreHours,
   isChoreCompletedOnDate
 } from '../utils/dateTime';
 import {
@@ -24,7 +27,6 @@ import {
   Sun,
   Sunset,
   Moon,
-  Trash2,
   Trophy,
   Clock,
   Lock,
@@ -43,8 +45,6 @@ interface ChoresViewProps {
   rewards: RewardItem[];
   todayStr: string;
   onToggleChore: (choreId: string, dateStr: string) => void;
-  onAddChore: (chore: Omit<Chore, 'id' | 'completedToday'>) => void;
-  onDeleteChore: (choreId: string) => void;
   onAddReward: (reward: Omit<RewardItem, 'id' | 'claimedCount'>) => void;
   onClaimReward: (rewardId: string, memberId: string) => void;
   onNavigateToSettings?: () => void;
@@ -60,8 +60,6 @@ export const ChoresView: React.FC<ChoresViewProps> = ({
   rewards,
   todayStr,
   onToggleChore,
-  onAddChore,
-  onDeleteChore,
   onAddReward,
   onClaimReward,
   onNavigateToSettings
@@ -76,14 +74,7 @@ export const ChoresView: React.FC<ChoresViewProps> = ({
   const [now, setNow] = useState<Date>(() => new Date());
 
   // Modals
-  const [isAddChoreOpen, setIsAddChoreOpen] = useState(false);
   const [isAddRewardOpen, setIsAddRewardOpen] = useState(false);
-
-  // New routine chore form state
-  const [newChoreTitle, setNewChoreTitle] = useState('');
-  const [newChorePeriod, setNewChorePeriod] = useState<ChorePeriod>('morning');
-  const [newChoreStars, setNewChoreStars] = useState(1);
-  const [newChoreIcon, setNewChoreIcon] = useState('⭐');
 
   // New reward form state
   const [newRewardTitle, setNewRewardTitle] = useState('');
@@ -133,17 +124,20 @@ export const ChoresView: React.FC<ChoresViewProps> = ({
   const progressPercent =
     memberChores.length > 0 ? Math.round((completedCount / memberChores.length) * 100) : 0;
 
-  const canTogglePeriod = (period: ChorePeriod) => {
+  const isChoreActiveNow = (chore: Chore) => {
     if (!isTodaySelected) {
       // Previous days can always be adjusted by parents
       return selectedDateStr <= todayStr;
     }
-    return isChorePeriodActiveNow(period, now);
+    return isChoreActiveAtTime(chore, now);
   };
 
   const handleChoreClick = (chore: Chore) => {
-    if (!canTogglePeriod(chore.period)) return;
     const isCompleted = isChoreCompletedOnDate(choreCompletionsByDate, selectedDateStr, chore.id);
+    const activeNow = isChoreActiveNow(chore);
+    // Completed chores can ALWAYS be unchecked ("ontvinken"), even if outside their hours
+    if (!isCompleted && !activeNow) return;
+
     if (!isCompleted) {
       confetti({
         particleCount: 70,
@@ -152,22 +146,6 @@ export const ChoresView: React.FC<ChoresViewProps> = ({
       });
     }
     onToggleChore(chore.id, selectedDateStr);
-  };
-
-  const handleAddChoreSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newChoreTitle.trim() || !selectedMemberId) return;
-
-    onAddChore({
-      memberId: selectedMemberId,
-      title: newChoreTitle.trim(),
-      period: newChorePeriod,
-      stars: newChoreStars,
-      icon: newChoreIcon
-    });
-
-    setNewChoreTitle('');
-    setIsAddChoreOpen(false);
   };
 
   const handleAddRewardSubmit = (e: React.FormEvent) => {
@@ -221,7 +199,10 @@ export const ChoresView: React.FC<ChoresViewProps> = ({
     emptyText: string,
     defaultEmoji: string
   ) => {
-    const isActiveNow = canTogglePeriod(period);
+    const hasAnyActiveChore =
+      items.length > 0
+        ? items.some(c => isChoreActiveNow(c))
+        : !isTodaySelected || isChorePeriodActiveNow(period, now);
     const completedInPeriod = items.filter(c =>
       isChoreCompletedOnDate(choreCompletionsByDate, selectedDateStr, c.id)
     ).length;
@@ -229,8 +210,8 @@ export const ChoresView: React.FC<ChoresViewProps> = ({
     return (
       <div
         className={`bg-white dark:bg-slate-900 rounded-2xl border p-4 shadow-xs space-y-3 transition-all ${
-          isTodaySelected && !isActiveNow
-            ? 'border-slate-200/70 dark:border-slate-800/70 opacity-80'
+          isTodaySelected && !hasAnyActiveChore
+            ? 'border-slate-200/70 dark:border-slate-800/70 opacity-85'
             : 'border-slate-200 dark:border-slate-800'
         }`}
       >
@@ -240,15 +221,15 @@ export const ChoresView: React.FC<ChoresViewProps> = ({
               {icon}
               <h4 className="font-bold text-sm text-slate-900 dark:text-white">{title}</h4>
             </div>
-            <div className="text-[11px] text-slate-400 mt-0.5 flex items-center gap-1.5">
+            <div className="text-[11px] text-slate-400 mt-0.5 flex items-center gap-1.5 flex-wrap">
               <span>{getChorePeriodTimeRange(period)}</span>
-              {isTodaySelected && !isActiveNow && (
+              {isTodaySelected && !hasAnyActiveChore && (
                 <span className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400 font-semibold">
                   <Lock className="w-3 h-3" />
                   Buiten tijdvak
                 </span>
               )}
-              {isTodaySelected && isActiveNow && period !== 'all_day' && (
+              {isTodaySelected && hasAnyActiveChore && period !== 'all_day' && (
                 <span className="text-emerald-600 dark:text-emerald-400 font-semibold">
                   · Nu actief
                 </span>
@@ -270,26 +251,34 @@ export const ChoresView: React.FC<ChoresViewProps> = ({
                 selectedDateStr,
                 chore.id
               );
+              const isActive = isChoreActiveNow(chore);
+              const canClick = isActive || isCompleted;
+              const effectiveRange = getChoreEffectiveTimeRange(chore);
+              const isCustomHours = hasCustomChoreHours(chore);
 
               return (
-                <div
+                <button
                   key={chore.id}
+                  type="button"
                   onClick={() => handleChoreClick(chore)}
+                  disabled={!canClick}
                   title={
-                    isActiveNow
+                    isCompleted
+                      ? 'Tik om taak weer uit te vinken (ontvinken)'
+                      : isActive
                       ? 'Tik om af te vinken'
-                      : `Alleen af te vinken tussen ${getChorePeriodTimeRange(period)}`
+                      : `Alleen af te vinken tussen ${effectiveRange}`
                   }
-                  className={`p-3 rounded-xl border text-xs flex items-center justify-between gap-3 transition-all ${
-                    !isActiveNow
+                  className={`w-full p-3 rounded-xl border text-left text-xs flex items-center justify-between gap-3 transition-all ${
+                    !canClick
                       ? 'cursor-not-allowed bg-slate-50/70 dark:bg-slate-800/20 border-slate-200/70 dark:border-slate-800 text-slate-500'
                       : isCompleted
-                      ? 'cursor-pointer bg-emerald-50/70 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800 text-emerald-900 dark:text-emerald-200'
+                      ? 'cursor-pointer bg-emerald-50/70 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800 text-emerald-900 dark:text-emerald-200 hover:border-emerald-400'
                       : 'cursor-pointer bg-slate-50 dark:bg-slate-800/40 border-slate-200 dark:border-slate-700 hover:border-indigo-300'
                   }`}
                 >
-                  <div className="flex items-center gap-2.5 truncate">
-                    {!isActiveNow && !isCompleted ? (
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    {!isActive && !isCompleted ? (
                       <Lock className="w-4 h-4 text-slate-400 shrink-0" />
                     ) : isCompleted ? (
                       <CheckCircle2 className="w-5 h-5 text-emerald-600 dark:text-emerald-400 shrink-0" />
@@ -297,34 +286,35 @@ export const ChoresView: React.FC<ChoresViewProps> = ({
                       <Circle className="w-5 h-5 text-slate-400 shrink-0" />
                     )}
                     <span className="text-xl shrink-0">{chore.icon || defaultEmoji}</span>
-                    <span
-                      className={`font-semibold truncate ${
-                        isCompleted
-                          ? 'line-through text-emerald-800/70 dark:text-emerald-300/70'
-                          : 'text-slate-800 dark:text-slate-200'
-                      }`}
-                    >
-                      {chore.title}
-                    </span>
+                    <div className="min-w-0">
+                      <div
+                        className={`font-semibold truncate ${
+                          isCompleted
+                            ? 'line-through text-emerald-800/70 dark:text-emerald-300/70'
+                            : 'text-slate-800 dark:text-slate-200'
+                        }`}
+                      >
+                        {chore.title}
+                      </div>
+                      {(isCustomHours || (!isActive && !isCompleted)) && (
+                        <div className="text-[10px] font-mono tabular-nums text-slate-400 dark:text-slate-500 mt-0.5">
+                          {effectiveRange}
+                        </div>
+                      )}
+                    </div>
                   </div>
 
-                  <div className="flex items-center gap-1.5 shrink-0">
+                  <div className="flex flex-col items-end gap-0.5 shrink-0">
                     <span className="text-amber-500 font-bold font-mono tabular-nums">
                       +{chore.stars}★
                     </span>
-                    <button
-                      type="button"
-                      onClick={e => {
-                        e.stopPropagation();
-                        onDeleteChore(chore.id);
-                      }}
-                      className="text-slate-300 hover:text-red-500 p-1"
-                      title="Verwijder taak"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                    {isCompleted && (
+                      <span className="text-[10px] text-emerald-700/70 dark:text-emerald-300/70 font-medium">
+                        Ontvinken
+                      </span>
+                    )}
                   </div>
-                </div>
+                </button>
               );
             })
           )}
@@ -447,13 +437,17 @@ export const ChoresView: React.FC<ChoresViewProps> = ({
                 </button>
               )}
 
-              <button
-                onClick={() => setIsAddChoreOpen(true)}
-                className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-xs transition-colors"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                <span>Routine toevoegen</span>
-              </button>
+              {onNavigateToSettings && (
+                <button
+                  type="button"
+                  onClick={onNavigateToSettings}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 transition-colors"
+                  title="Routines toevoegen, uren kiezen of verwijderen via Instellingen"
+                >
+                  <Lock className="w-3.5 h-3.5 text-amber-500" />
+                  <span>Routines beheren</span>
+                </button>
+              )}
             </div>
           </div>
 
@@ -847,96 +841,6 @@ export const ChoresView: React.FC<ChoresViewProps> = ({
         </div>
       )}
 
-
-      {/* Modal: Add Routine Chore */}
-      {isAddChoreOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs">
-          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 shadow-xl w-full max-w-md space-y-4 text-xs animate-in fade-in zoom-in-95">
-            <h3 className="text-base font-bold text-slate-900 dark:text-white">
-              Nieuwe routine toevoegen voor {selectedMember?.name}
-            </h3>
-
-            <form onSubmit={handleAddChoreSubmit} className="space-y-3">
-              <div>
-                <label className="block font-semibold mb-1">Titel van de taak</label>
-                <input
-                  type="text"
-                  value={newChoreTitle}
-                  onChange={e => setNewChoreTitle(e.target.value)}
-                  placeholder="bijv. Huiswerk maken, Bed opmaken, Hond uitlaten"
-                  className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm"
-                  autoFocus
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block font-semibold mb-1">Moment van de dag</label>
-                  <select
-                    value={newChorePeriod}
-                    onChange={e => setNewChorePeriod(e.target.value as ChorePeriod)}
-                    className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800"
-                  >
-                    <option value="morning">Ochtend (00:00–12:00)</option>
-                    <option value="afternoon">Middag (12:00–18:00)</option>
-                    <option value="evening">Avond (18:00–00:00)</option>
-                    <option value="all_day">Hele dag (altijd)</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block font-semibold mb-1">Sterren beloning</label>
-                  <select
-                    value={newChoreStars}
-                    onChange={e => setNewChoreStars(Number(e.target.value))}
-                    className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800"
-                  >
-                    <option value={1}>1 ster ★</option>
-                    <option value={2}>2 sterren ★★</option>
-                    <option value={3}>3 sterren ★★★</option>
-                  </select>
-                </div>
-              </div>
-
-              <div>
-                <label className="block font-semibold mb-1">Icoon</label>
-                <div className="flex gap-2 flex-wrap">
-                  {['🪥', '🎒', '📚', '🧸', '🍽️', '✨', '🐾', '🚴', '⚽'].map(emoji => (
-                    <button
-                      type="button"
-                      key={emoji}
-                      onClick={() => setNewChoreIcon(emoji)}
-                      className={`text-lg p-1.5 rounded-lg border ${
-                        newChoreIcon === emoji
-                          ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-950'
-                          : 'border-slate-200 dark:border-slate-700'
-                      }`}
-                    >
-                      {emoji}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="flex justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
-                <button
-                  type="button"
-                  onClick={() => setIsAddChoreOpen(false)}
-                  className="px-4 py-2 rounded-lg text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
-                >
-                  Annuleren
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-semibold"
-                >
-                  Taak opslaan
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
 
       {/* Modal: Add Reward */}
       {isAddRewardOpen && (

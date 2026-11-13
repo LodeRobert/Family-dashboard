@@ -49,6 +49,8 @@ export interface Chore {
   memberId: string;
   title: string;
   period: ChorePeriod;
+  startTime?: string; // Optional custom HH:mm start time (e.g. "07:00")
+  endTime?: string; // Optional custom HH:mm end time (e.g. "09:00")
   stars: number;
   icon?: string;
   completedToday?: boolean; // Legacy field kept optional for smooth migration

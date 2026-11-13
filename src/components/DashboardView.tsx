@@ -11,9 +11,10 @@ import { MemberAvatar } from './MemberAvatar';
 import { CalendarAssigneeBadge } from './CalendarAssigneeBadge';
 import {
   getLocalDateStr,
-  isChorePeriodActiveNow,
+  isChoreActiveAtTime,
   getChorePeriodLabel,
-  getChorePeriodTimeRange,
+  getChoreEffectiveTimeRange,
+  hasCustomChoreHours,
   isChoreCompletedOnDate,
   getEventStartDateStr,
   formatLocalDateNL
@@ -142,8 +143,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   }).format(currentTime);
 
   const handleChoreClick = (chore: Chore) => {
-    if (!isChorePeriodActiveNow(chore.period, currentTime)) return;
     const isCompleted = isChoreCompletedOnDate(choreCompletionsByDate, todayStr, chore.id);
+    const isActive = isChoreActiveAtTime(chore, currentTime);
+    if (!isCompleted && !isActive) return;
+
     if (!isCompleted) {
       confetti({
         particleCount: 50,
@@ -156,8 +159,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
   // Show active-period & all-day chores first on Dashboard
   const sortedChores = [...chores].sort((a, b) => {
-    const aActive = isChorePeriodActiveNow(a.period, currentTime) ? 0 : 1;
-    const bActive = isChorePeriodActiveNow(b.period, currentTime) ? 0 : 1;
+    const aActive = isChoreActiveAtTime(a, currentTime) ? 0 : 1;
+    const bActive = isChoreActiveAtTime(b, currentTime) ? 0 : 1;
     return aActive - bActive;
   });
 
@@ -473,24 +476,29 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     todayStr,
                     chore.id
                   );
-                  const isActive = isChorePeriodActiveNow(chore.period, currentTime);
+                  const isActive = isChoreActiveAtTime(chore, currentTime);
+                  const canClick = isActive || isCompleted;
+                  const effectiveRange = getChoreEffectiveTimeRange(chore);
+                  const customHours = hasCustomChoreHours(chore);
 
                   return (
                     <button
                       key={chore.id}
                       onClick={() => handleChoreClick(chore)}
-                      disabled={!isActive}
+                      disabled={!canClick}
                       title={
-                        isActive
+                        isCompleted
+                          ? 'Tik om taak weer uit te vinken (ontvinken)'
+                          : isActive
                           ? 'Tik om te voltooien'
-                          : `Alleen af te vinken in ${getChorePeriodLabel(chore.period).toLowerCase()} (${getChorePeriodTimeRange(chore.period)})`
+                          : `Alleen af te vinken tussen ${effectiveRange}`
                       }
                       className={`w-full p-2.5 rounded-lg border text-left flex items-center justify-between gap-3 transition-all ${
-                        !isActive
+                        !canClick
                           ? 'bg-slate-50/60 dark:bg-slate-800/20 border-slate-200/60 dark:border-slate-800 text-slate-400 cursor-not-allowed opacity-70'
                           : isCompleted
-                          ? 'bg-emerald-50/60 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800/50 text-emerald-900 dark:text-emerald-200'
-                          : 'bg-slate-50/80 dark:bg-slate-800/40 border-slate-200 dark:border-slate-700/60 text-slate-800 dark:text-slate-200 hover:border-indigo-300'
+                          ? 'bg-emerald-50/60 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800/50 text-emerald-900 dark:text-emerald-200 cursor-pointer hover:border-emerald-400'
+                          : 'bg-slate-50/80 dark:bg-slate-800/40 border-slate-200 dark:border-slate-700/60 text-slate-800 dark:text-slate-200 hover:border-indigo-300 cursor-pointer'
                       }`}
                     >
                       <div className="flex items-center gap-2.5 truncate">
@@ -514,8 +522,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                       </div>
 
                       <div className="flex items-center gap-1.5 shrink-0 text-xs">
-                        <span className="text-[10px] text-slate-400 hidden sm:inline">
-                          {getChorePeriodLabel(chore.period)}
+                        <span className="text-[10px] text-slate-400 hidden sm:inline font-mono tabular-nums">
+                          {customHours ? effectiveRange : getChorePeriodLabel(chore.period)}
                         </span>
                         {member && (
                           <span className="text-[10px] text-slate-500 font-medium">

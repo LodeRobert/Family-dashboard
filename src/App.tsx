@@ -577,6 +577,13 @@ export default function App() {
     }));
   };
 
+  const handleUpdateChore = async (choreId: string, updates: Partial<Chore>) => {
+    await updateStateAndPersist(prev => ({
+      ...prev,
+      chores: prev.chores.map(c => (c.id === choreId ? { ...c, ...updates } : c))
+    }));
+  };
+
   const handleDeleteChore = async (choreId: string) => {
     await updateStateAndPersist(prev => ({
       ...prev,
@@ -867,8 +874,6 @@ export default function App() {
             rewards={appState.rewards}
             todayStr={todayStr}
             onToggleChore={handleToggleChore}
-            onAddChore={handleAddChore}
-            onDeleteChore={handleDeleteChore}
             onAddReward={handleAddReward}
             onClaimReward={handleClaimReward}
             onNavigateToSettings={() => setCurrentTab('settings')}
@@ -903,6 +908,9 @@ export default function App() {
               onUpdateStarLog={handleUpdateStarLog}
               onDeleteStarLog={handleDeleteStarLog}
               onClearMemberStars={handleClearMemberStars}
+              onAddChore={handleAddChore}
+              onUpdateChore={handleUpdateChore}
+              onDeleteChore={handleDeleteChore}
               onUpdateCalendars={handleUpdateCalendars}
               onOpenManageCalendars={() => setIsManageCalendarsOpen(true)}
               onLockSettings={() => setIsSettingsUnlocked(false)}

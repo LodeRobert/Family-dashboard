@@ -1,4 +1,4 @@
-import { ChorePeriod } from '../types';
+import { Chore, ChorePeriod } from '../types';
 
 /**
  * Returns YYYY-MM-DD in the user's LOCAL timezone (so day rollover happens cleanly at 00:00 local time).
@@ -77,6 +77,85 @@ export function getChorePeriodTimeRange(period: ChorePeriod): string {
     case 'all_day':
       return 'Hele dag geldig';
   }
+}
+
+export function getDefaultPeriodTimes(period: ChorePeriod): {
+  startTime: string;
+  endTime: string;
+} {
+  switch (period) {
+    case 'morning':
+      return { startTime: '00:00', endTime: '12:00' };
+    case 'afternoon':
+      return { startTime: '12:00', endTime: '18:00' };
+    case 'evening':
+      return { startTime: '18:00', endTime: '00:00' };
+    case 'all_day':
+      return { startTime: '00:00', endTime: '23:59' };
+  }
+}
+
+function parseTimeToMinutes(timeStr?: string): number | null {
+  if (!timeStr) return null;
+  const match = timeStr.trim().match(/^(\d{1,2}):(\d{2})$/);
+  if (!match) return null;
+  const h = Number(match[1]);
+  const m = Number(match[2]);
+  if (h < 0 || h > 24 || m < 0 || m > 59 || (h === 24 && m > 0)) return null;
+  return h * 60 + m;
+}
+
+export function isChoreActiveAtTime(
+  chore: Pick<Chore, 'period' | 'startTime' | 'endTime'>,
+  date: Date = new Date()
+): boolean {
+  const startMins = parseTimeToMinutes(chore.startTime);
+  const rawEndMins = parseTimeToMinutes(chore.endTime);
+
+  if (startMins !== null && rawEndMins !== null) {
+    const nowMins = date.getHours() * 60 + date.getMinutes();
+    let effectiveEnd = rawEndMins;
+    if (chore.endTime === '00:00' && startMins > 0) {
+      effectiveEnd = 24 * 60;
+    } else if (chore.endTime === '23:59') {
+      effectiveEnd = 24 * 60;
+    }
+
+    if (startMins === effectiveEnd) return true;
+    if (startMins < effectiveEnd) {
+      return nowMins >= startMins && nowMins < effectiveEnd;
+    }
+    // Overnight window (e.g. 20:00 - 06:00)
+    return nowMins >= startMins || nowMins < effectiveEnd;
+  }
+
+  return isChorePeriodActiveNow(chore.period, date);
+}
+
+export function hasCustomChoreHours(
+  chore: Pick<Chore, 'period' | 'startTime' | 'endTime'>
+): boolean {
+  if (!chore.startTime || !chore.endTime) return false;
+  if (chore.period === 'all_day') {
+    return !(
+      chore.startTime === '00:00' &&
+      (chore.endTime === '23:59' || chore.endTime === '00:00')
+    );
+  }
+  const def = getDefaultPeriodTimes(chore.period);
+  return chore.startTime !== def.startTime || chore.endTime !== def.endTime;
+}
+
+export function getChoreEffectiveTimeRange(
+  chore: Pick<Chore, 'period' | 'startTime' | 'endTime'>
+): string {
+  if (chore.startTime && chore.endTime) {
+    if (chore.period === 'all_day' && !hasCustomChoreHours(chore)) {
+      return 'Hele dag geldig';
+    }
+    return `${chore.startTime} – ${chore.endTime}`;
+  }
+  return getChorePeriodTimeRange(chore.period);
 }
 
 export function isChoreCompletedOnDate(

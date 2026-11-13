@@ -5,6 +5,8 @@ import {
   CalendarAssignmentMode,
   CalendarMultiDayMode,
   CalendarSource,
+  Chore,
+  ChorePeriod,
   FamilyMember,
   WeatherLocationResult
 } from '../types';
@@ -19,7 +21,14 @@ import {
   uploadMemberAvatar,
   changeSettingsPassword
 } from '../services/storage';
-import { getLocalDateStr, formatLocalDateNL } from '../utils/dateTime';
+import {
+  getLocalDateStr,
+  formatLocalDateNL,
+  getDefaultPeriodTimes,
+  getChorePeriodLabel,
+  getChoreEffectiveTimeRange,
+  hasCustomChoreHours
+} from '../utils/dateTime';
 import {
   UserPlus,
   Trash2,
@@ -55,6 +64,9 @@ interface SettingsViewProps {
   onUpdateStarLog: (logId: string, updates: { title: string; stars: number; date: string }) => void;
   onDeleteStarLog: (logId: string) => void;
   onClearMemberStars: (memberId: string) => void;
+  onAddChore: (chore: Omit<Chore, 'id' | 'completedToday'>) => void;
+  onUpdateChore: (choreId: string, updates: Partial<Chore>) => void;
+  onDeleteChore: (choreId: string) => void;
   onUpdateCalendars: (calendars: CalendarSource[]) => void;
   onOpenManageCalendars: () => void;
   onLockSettings: () => void;
@@ -62,6 +74,7 @@ interface SettingsViewProps {
 }
 
 const EMOJI_CHOICES = ['👨', '👩', '👦', '👧', '🧑', '👴', '👵', '🐶', '🐱', '⭐', '⚽', '🎨'];
+const CHORE_EMOJIS = ['🪥', '🎒', '📚', '🧸', '🍽️', '✨', '🐾', '🚴', '⚽', '🛏️', '🚿', '🧹'];
 
 export const SettingsView: React.FC<SettingsViewProps> = ({
   appState,
@@ -72,12 +85,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   onUpdateStarLog,
   onDeleteStarLog,
   onClearMemberStars,
+  onAddChore,
+  onUpdateChore,
+  onDeleteChore,
   onUpdateCalendars,
   onOpenManageCalendars,
   onLockSettings,
   onRestoreState
 }) => {
-  const { settings, familyMembers, calendars, starLogs } = appState;
+  const { settings, familyMembers, calendars, starLogs, chores } = appState;
 
   // Weather search state
   const [cityQuery, setCityQuery] = useState(settings.cityName || '');
@@ -117,6 +133,29 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [editLogStars, setEditLogStars] = useState<string>('1');
   const [editLogDate, setEditLogDate] = useState<string>('');
   const [confirmClearMemberId, setConfirmClearMemberId] = useState<string | null>(null);
+
+  // Routines / Takenbord management state (password-protected)
+  const [choreMemberFilter, setChoreMemberFilter] = useState<string>('all');
+  const [newChoreMemberId, setNewChoreMemberId] = useState<string>(
+    familyMembers.find(m => m.role === 'child')?.id || familyMembers[0]?.id || ''
+  );
+  const [newChoreTitle, setNewChoreTitle] = useState('');
+  const [newChorePeriod, setNewChorePeriod] = useState<ChorePeriod>('morning');
+  const [newChoreUseHours, setNewChoreUseHours] = useState<boolean>(true);
+  const [newChoreStartTime, setNewChoreStartTime] = useState<string>('00:00');
+  const [newChoreEndTime, setNewChoreEndTime] = useState<string>('12:00');
+  const [newChoreStars, setNewChoreStars] = useState<number>(1);
+  const [newChoreIcon, setNewChoreIcon] = useState<string>('🪥');
+  const [editingChoreId, setEditingChoreId] = useState<string | null>(null);
+  const [editChoreMemberId, setEditChoreMemberId] = useState<string>('');
+  const [editChoreTitle, setEditChoreTitle] = useState<string>('');
+  const [editChorePeriod, setEditChorePeriod] = useState<ChorePeriod>('morning');
+  const [editChoreUseHours, setEditChoreUseHours] = useState<boolean>(true);
+  const [editChoreStartTime, setEditChoreStartTime] = useState<string>('00:00');
+  const [editChoreEndTime, setEditChoreEndTime] = useState<string>('12:00');
+  const [editChoreStars, setEditChoreStars] = useState<number>(1);
+  const [editChoreIcon, setEditChoreIcon] = useState<string>('✨');
+  const [confirmDeleteChoreId, setConfirmDeleteChoreId] = useState<string | null>(null);
 
   // New local calendar form
   const [isAddingCalendar, setIsAddingCalendar] = useState(false);
@@ -318,6 +357,84 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       date: editLogDate
     });
     setEditingLogId(null);
+  };
+
+  // --- Chore / Routine handlers (password-protected) ---
+  const handleNewChorePeriodChange = (period: ChorePeriod) => {
+    setNewChorePeriod(period);
+    if (period === 'all_day') {
+      setNewChoreUseHours(false);
+      setNewChoreStartTime('00:00');
+      setNewChoreEndTime('23:59');
+    } else {
+      const def = getDefaultPeriodTimes(period);
+      setNewChoreUseHours(true);
+      setNewChoreStartTime(def.startTime);
+      setNewChoreEndTime(def.endTime);
+    }
+  };
+
+  const handleAddChoreSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const targetMemberId = newChoreMemberId || familyMembers[0]?.id;
+    if (!newChoreTitle.trim() || !targetMemberId) return;
+
+    const shouldSaveHours = newChorePeriod !== 'all_day' || newChoreUseHours;
+    onAddChore({
+      memberId: targetMemberId,
+      title: newChoreTitle.trim(),
+      period: newChorePeriod,
+      startTime: shouldSaveHours ? newChoreStartTime : undefined,
+      endTime: shouldSaveHours ? newChoreEndTime : undefined,
+      stars: Math.max(1, Number(newChoreStars) || 1),
+      icon: newChoreIcon || '✨'
+    });
+    setNewChoreTitle('');
+  };
+
+  const startEditingChore = (chore: Chore) => {
+    const def = getDefaultPeriodTimes(chore.period);
+    setEditingChoreId(chore.id);
+    setConfirmDeleteChoreId(null);
+    setEditChoreMemberId(chore.memberId);
+    setEditChoreTitle(chore.title);
+    setEditChorePeriod(chore.period);
+    setEditChoreUseHours(
+      chore.period !== 'all_day' || Boolean(chore.startTime && chore.endTime)
+    );
+    setEditChoreStartTime(chore.startTime || def.startTime);
+    setEditChoreEndTime(chore.endTime || def.endTime);
+    setEditChoreStars(chore.stars);
+    setEditChoreIcon(chore.icon || '✨');
+  };
+
+  const handleEditChorePeriodChange = (period: ChorePeriod) => {
+    setEditChorePeriod(period);
+    if (period === 'all_day') {
+      setEditChoreUseHours(false);
+      setEditChoreStartTime('00:00');
+      setEditChoreEndTime('23:59');
+    } else {
+      const def = getDefaultPeriodTimes(period);
+      setEditChoreUseHours(true);
+      setEditChoreStartTime(def.startTime);
+      setEditChoreEndTime(def.endTime);
+    }
+  };
+
+  const handleSaveChoreEdit = (choreId: string) => {
+    if (!editChoreTitle.trim()) return;
+    const shouldSaveHours = editChorePeriod !== 'all_day' || editChoreUseHours;
+    onUpdateChore(choreId, {
+      memberId: editChoreMemberId || familyMembers[0]?.id,
+      title: editChoreTitle.trim(),
+      period: editChorePeriod,
+      startTime: shouldSaveHours ? editChoreStartTime : undefined,
+      endTime: shouldSaveHours ? editChoreEndTime : undefined,
+      stars: Math.max(1, Number(editChoreStars) || 1),
+      icon: editChoreIcon || '✨'
+    });
+    setEditingChoreId(null);
   };
 
   // --- Calendar handlers ---
@@ -1328,6 +1445,475 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })()}
+      </section>
+
+      {/* SECTION 3C: Routines & Takenbord per Dagdeel (enkel via instellingen, met eigen uren) */}
+      <section className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 sm:p-6 shadow-xs space-y-5">
+        <div className="flex items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-3 flex-wrap">
+          <div className="flex items-center gap-2.5">
+            <Clock className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
+            <div>
+              <h2 className="text-base font-bold text-slate-900 dark:text-white">
+                Takenbord & Dagroutines Beheren (enkel na wachtwoord)
+              </h2>
+              <p className="text-xs text-slate-500">
+                Voeg routines toe, verwijder ze of stel per taak exact de uren in waartussen deze afgevinkt mag worden.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Add New Routine Form */}
+        <form
+          onSubmit={handleAddChoreSubmit}
+          className="p-4 rounded-xl border border-indigo-200/80 dark:border-indigo-900/50 bg-indigo-50/40 dark:bg-indigo-950/15 space-y-3 text-xs"
+        >
+          <div className="font-bold text-sm text-slate-900 dark:text-white flex items-center gap-1.5">
+            <Plus className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+            <span>Nieuwe routine toevoegen</span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            <div>
+              <label className="block font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                Gezinslid
+              </label>
+              <select
+                value={newChoreMemberId || familyMembers[0]?.id || ''}
+                onChange={e => setNewChoreMemberId(e.target.value)}
+                className="w-full px-2.5 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800"
+              >
+                {familyMembers.map(m => (
+                  <option key={m.id} value={m.id}>
+                    {m.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="sm:col-span-2">
+              <label className="block font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                Titel van de taak *
+              </label>
+              <input
+                type="text"
+                value={newChoreTitle}
+                onChange={e => setNewChoreTitle(e.target.value)}
+                placeholder="bijv. Tanden poetsen, Huiswerk maken, Tafel dekken"
+                className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800"
+                required
+              />
+            </div>
+
+            <div>
+              <label className="block font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                Sterren beloning
+              </label>
+              <select
+                value={newChoreStars}
+                onChange={e => setNewChoreStars(Number(e.target.value))}
+                className="w-full px-2.5 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 font-mono"
+              >
+                {[1, 2, 3, 4, 5, 10].map(val => (
+                  <option key={val} value={val}>
+                    {val} {val === 1 ? 'ster' : 'sterren'} ★
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
+            <div>
+              <label className="block font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                Dagdeel
+              </label>
+              <select
+                value={newChorePeriod}
+                onChange={e => handleNewChorePeriodChange(e.target.value as ChorePeriod)}
+                className="w-full px-2.5 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800"
+              >
+                <option value="morning">Ochtend</option>
+                <option value="afternoon">Middag</option>
+                <option value="evening">Avond</option>
+                <option value="all_day">Hele dag</option>
+              </select>
+            </div>
+
+            {newChorePeriod === 'all_day' ? (
+              <div className="sm:col-span-2 flex flex-wrap items-center gap-3 pb-1">
+                <label className="inline-flex items-center gap-2 cursor-pointer font-semibold text-slate-700 dark:text-slate-300">
+                  <input
+                    type="checkbox"
+                    checked={newChoreUseHours}
+                    onChange={e => setNewChoreUseHours(e.target.checked)}
+                    className="w-4 h-4 rounded text-indigo-600"
+                  />
+                  <span>Toch vaste uren instellen voor deze taak</span>
+                </label>
+                {!newChoreUseHours && (
+                  <span className="text-[11px] text-slate-500">
+                    Standaard altijd af te vinken (hele dag)
+                  </span>
+                )}
+              </div>
+            ) : null}
+
+            {(newChorePeriod !== 'all_day' || newChoreUseHours) && (
+              <>
+                <div>
+                  <label className="block font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                    Af te vinken vanaf (uur)
+                  </label>
+                  <input
+                    type="time"
+                    value={newChoreStartTime}
+                    onChange={e => setNewChoreStartTime(e.target.value)}
+                    className="w-full px-2.5 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 font-mono"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                    Tot (uur)
+                  </label>
+                  <input
+                    type="time"
+                    value={newChoreEndTime}
+                    onChange={e => setNewChoreEndTime(e.target.value)}
+                    className="w-full px-2.5 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 font-mono"
+                    required
+                  />
+                </div>
+              </>
+            )}
+          </div>
+
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="font-semibold text-slate-600 dark:text-slate-400 mr-1">Icoon:</span>
+              {CHORE_EMOJIS.map(emoji => (
+                <button
+                  type="button"
+                  key={emoji}
+                  onClick={() => setNewChoreIcon(emoji)}
+                  className={`text-base p-1.5 rounded-lg border transition-colors ${
+                    newChoreIcon === emoji
+                      ? 'border-indigo-500 bg-indigo-100 dark:bg-indigo-900/60'
+                      : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800'
+                  }`}
+                >
+                  {emoji}
+                </button>
+              ))}
+            </div>
+
+            <button
+              type="submit"
+              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-lg transition-colors shrink-0 self-end sm:self-auto"
+            >
+              Routine toevoegen
+            </button>
+          </div>
+        </form>
+
+        {/* Filter Existing Routines by Member */}
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs">
+          <button
+            type="button"
+            onClick={() => setChoreMemberFilter('all')}
+            className={`px-3 py-1.5 rounded-lg font-semibold whitespace-nowrap ${
+              choreMemberFilter === 'all'
+                ? 'bg-indigo-600 text-white'
+                : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
+            }`}
+          >
+            Iedereen ({chores.length})
+          </button>
+          {familyMembers.map(m => {
+            const count = chores.filter(c => c.memberId === m.id).length;
+            return (
+              <button
+                type="button"
+                key={m.id}
+                onClick={() => setChoreMemberFilter(m.id)}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-semibold whitespace-nowrap ${
+                  choreMemberFilter === m.id
+                    ? 'bg-indigo-600 text-white'
+                    : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
+                }`}
+              >
+                <span>{m.name}</span>
+                <span className="font-mono opacity-80">({count})</span>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Existing Routines List (Edit hours/period/title/member or Delete) */}
+        {(() => {
+          const periodOrder: Record<ChorePeriod, number> = {
+            morning: 0,
+            afternoon: 1,
+            evening: 2,
+            all_day: 3
+          };
+          const filteredChores = [...chores]
+            .filter(c => choreMemberFilter === 'all' || c.memberId === choreMemberFilter)
+            .sort((a, b) => {
+              if (a.memberId !== b.memberId) return a.memberId.localeCompare(b.memberId);
+              return periodOrder[a.period] - periodOrder[b.period];
+            });
+
+          if (filteredChores.length === 0) {
+            return (
+              <div className="py-8 text-center text-xs text-slate-400 border border-dashed border-slate-200 dark:border-slate-800 rounded-xl">
+                Geen routines gevonden voor deze selectie.
+              </div>
+            );
+          }
+
+          return (
+            <div className="border border-slate-200 dark:border-slate-800 rounded-xl divide-y divide-slate-100 dark:divide-slate-800 text-xs">
+              {filteredChores.map(chore => {
+                const mem = familyMembers.find(m => m.id === chore.memberId);
+                const isEditing = editingChoreId === chore.id;
+                const effectiveRange = getChoreEffectiveTimeRange(chore);
+                const customHours = hasCustomChoreHours(chore);
+
+                if (isEditing) {
+                  return (
+                    <div
+                      key={chore.id}
+                      className="p-4 bg-indigo-50/50 dark:bg-indigo-950/20 space-y-3"
+                    >
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
+                        <div>
+                          <label className="block font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                            Gezinslid
+                          </label>
+                          <select
+                            value={editChoreMemberId}
+                            onChange={e => setEditChoreMemberId(e.target.value)}
+                            className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900"
+                          >
+                            {familyMembers.map(m => (
+                              <option key={m.id} value={m.id}>
+                                {m.name}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div className="sm:col-span-2">
+                          <label className="block font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                            Titel
+                          </label>
+                          <input
+                            type="text"
+                            value={editChoreTitle}
+                            onChange={e => setEditChoreTitle(e.target.value)}
+                            className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                            Sterren
+                          </label>
+                          <select
+                            value={editChoreStars}
+                            onChange={e => setEditChoreStars(Number(e.target.value))}
+                            className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono"
+                          >
+                            {[1, 2, 3, 4, 5, 10].map(val => (
+                              <option key={val} value={val}>
+                                {val} ★
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 items-end">
+                        <div>
+                          <label className="block font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                            Dagdeel
+                          </label>
+                          <select
+                            value={editChorePeriod}
+                            onChange={e => handleEditChorePeriodChange(e.target.value as ChorePeriod)}
+                            className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900"
+                          >
+                            <option value="morning">Ochtend</option>
+                            <option value="afternoon">Middag</option>
+                            <option value="evening">Avond</option>
+                            <option value="all_day">Hele dag</option>
+                          </select>
+                        </div>
+
+                        {editChorePeriod === 'all_day' && (
+                          <div className="sm:col-span-2 flex items-center gap-2 pb-1.5">
+                            <label className="inline-flex items-center gap-2 cursor-pointer font-semibold text-slate-700 dark:text-slate-300">
+                              <input
+                                type="checkbox"
+                                checked={editChoreUseHours}
+                                onChange={e => setEditChoreUseHours(e.target.checked)}
+                                className="w-4 h-4 rounded text-indigo-600"
+                              />
+                              <span>Toch specifieke uren instellen</span>
+                            </label>
+                          </div>
+                        )}
+
+                        {(editChorePeriod !== 'all_day' || editChoreUseHours) && (
+                          <>
+                            <div>
+                              <label className="block font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                                Vanaf (uur)
+                              </label>
+                              <input
+                                type="time"
+                                value={editChoreStartTime}
+                                onChange={e => setEditChoreStartTime(e.target.value)}
+                                className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono"
+                              />
+                            </div>
+                            <div>
+                              <label className="block font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                                Tot (uur)
+                              </label>
+                              <input
+                                type="time"
+                                value={editChoreEndTime}
+                                onChange={e => setEditChoreEndTime(e.target.value)}
+                                className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono"
+                              />
+                            </div>
+                          </>
+                        )}
+                      </div>
+
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-1">
+                        <div className="flex items-center gap-1 flex-wrap">
+                          {CHORE_EMOJIS.map(emoji => (
+                            <button
+                              type="button"
+                              key={emoji}
+                              onClick={() => setEditChoreIcon(emoji)}
+                              className={`text-base p-1 rounded-lg border ${
+                                editChoreIcon === emoji
+                                  ? 'border-indigo-500 bg-indigo-100 dark:bg-indigo-900/60'
+                                  : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900'
+                              }`}
+                            >
+                              {emoji}
+                            </button>
+                          ))}
+                        </div>
+
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => handleSaveChoreEdit(chore.id)}
+                            className="px-3.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-semibold"
+                          >
+                            Opslaan
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setEditingChoreId(null)}
+                            className="px-3.5 py-1.5 rounded-lg bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200"
+                          >
+                            Annuleren
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                }
+
+                return (
+                  <div
+                    key={chore.id}
+                    className="p-3.5 flex items-center justify-between gap-3 hover:bg-slate-50/70 dark:hover:bg-slate-800/30"
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <span className="text-xl shrink-0">{chore.icon || '✨'}</span>
+                      <div className="min-w-0">
+                        <div className="font-semibold text-sm text-slate-900 dark:text-white truncate">
+                          {chore.title}
+                        </div>
+                        <div className="flex items-center gap-2 flex-wrap text-[11px] text-slate-500 mt-0.5">
+                          {mem && (
+                            <span className="inline-flex items-center gap-1 font-semibold text-slate-700 dark:text-slate-300">
+                              <MemberAvatar member={mem} size="xs" />
+                              <span>{mem.name}</span>
+                            </span>
+                          )}
+                          <span>·</span>
+                          <span className="font-medium text-indigo-600 dark:text-indigo-400">
+                            {getChorePeriodLabel(chore.period)}
+                          </span>
+                          <span>·</span>
+                          <span className="font-mono tabular-nums">
+                            {effectiveRange}
+                            {customHours ? ' (aangepast)' : ''}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span className="font-mono font-bold text-amber-500">+{chore.stars}★</span>
+
+                      {confirmDeleteChoreId === chore.id ? (
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              onDeleteChore(chore.id);
+                              setConfirmDeleteChoreId(null);
+                            }}
+                            className="px-2 py-1 bg-red-600 text-white rounded font-semibold"
+                          >
+                            Verwijder
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setConfirmDeleteChoreId(null)}
+                            className="px-2 py-1 bg-slate-200 dark:bg-slate-700 rounded"
+                          >
+                            Nee
+                          </button>
+                        </div>
+                      ) : (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => startEditingChore(chore)}
+                            className="p-1.5 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 transition-colors"
+                            title="Taak & uren aanpassen"
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setConfirmDeleteChoreId(chore.id)}
+                            className="p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/40 transition-colors"
+                            title="Taak verwijderen"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </>
+                      )}
                     </div>
                   </div>
                 );
