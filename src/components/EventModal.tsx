@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { CalendarEvent, CalendarSource, FamilyMember } from '../types';
-import { getLocalDateStr } from '../utils/dateTime';
-import { X, Calendar, Clock, MapPin, User, Trash2, AlertCircle } from 'lucide-react';
+import { getLocalDateStr, shiftLocalDateStr } from '../utils/dateTime';
+import { getCalendarAssignees } from '../utils/calendarHelpers';
+import { X, Trash2, AlertCircle } from 'lucide-react';
 
 interface EventModalProps {
   isOpen: boolean;
@@ -32,6 +33,7 @@ export const EventModal: React.FC<EventModalProps> = ({
   const [endTime, setEndTime] = useState('11:00');
   const [allDay, setAllDay] = useState(false);
   const [assignedTo, setAssignedTo] = useState('');
+  const [multiDayOverride, setMultiDayOverride] = useState<'default' | 'all_days' | 'start_day_only'>('default');
   const [location, setLocation] = useState('');
   const [description, setDescription] = useState('');
   const [isSaving, setIsSaving] = useState(false);
@@ -57,18 +59,32 @@ export const EventModal: React.FC<EventModalProps> = ({
       setEndTime(end.toTimeString().substring(0, 5));
       setAllDay(!!editingEvent.allDay);
       setAssignedTo(editingEvent.assignedTo || '');
+      setMultiDayOverride(editingEvent.multiDayOverride || 'default');
       setLocation(editingEvent.location || '');
       setDescription(editingEvent.description || '');
     } else {
-      const defaultDate = initialDate || getLocalDateStr();
+      const hasTime = Boolean(initialDate && initialDate.includes('T'));
+      const defaultDate = hasTime
+        ? initialDate!.split('T')[0]
+        : initialDate || getLocalDateStr();
+      const startHourStr = hasTime ? initialDate!.split('T')[1].slice(0, 5) : '10:00';
+      const startHourNum = parseInt(startHourStr.split(':')[0], 10);
+      const nextHourNum = (Number.isNaN(startHourNum) ? 10 : startHourNum + 1) % 24;
+      const endHourStr = `${String(nextHourNum).padStart(2, '0')}:00`;
+      const calculatedEndDate = nextHourNum === 0 && startHourNum === 23
+        ? shiftLocalDateStr(defaultDate, 1)
+        : defaultDate;
+
+      const firstLocalCal = calendars.find(c => c.type === 'local') || calendars[0];
       setTitle('');
-      setCalendarId(calendars[0]?.id || 'cal-family');
+      setCalendarId(firstLocalCal?.id || 'cal-family');
       setStartDate(defaultDate);
-      setEndDate(defaultDate);
-      setStartTime('10:00');
-      setEndTime('11:00');
+      setEndDate(calculatedEndDate);
+      setStartTime(startHourStr);
+      setEndTime(endHourStr);
       setAllDay(false);
       setAssignedTo('');
+      setMultiDayOverride('default');
       setLocation('');
       setDescription('');
     }
@@ -106,6 +122,7 @@ export const EventModal: React.FC<EventModalProps> = ({
         endTime: endIso,
         allDay,
         assignedTo: assignedTo || undefined,
+        multiDayOverride: multiDayOverride !== 'default' ? multiDayOverride : undefined,
         location: location.trim() || undefined,
         description: description.trim() || undefined
       });
@@ -213,11 +230,15 @@ export const EventModal: React.FC<EventModalProps> = ({
                 >
                   {calendars
                     .filter(cal => cal.type === 'local' || cal.id === calendarId)
-                    .map(cal => (
-                      <option key={cal.id} value={cal.id}>
-                        {cal.name} {cal.type === 'ical' ? '(Alleen-lezen iCal)' : ''}
-                      </option>
-                    ))}
+                    .map(cal => {
+                      const assignees = getCalendarAssignees(cal, familyMembers);
+                      return (
+                        <option key={cal.id} value={cal.id}>
+                          {cal.name} ({assignees.label})
+                          {cal.type === 'ical' ? ' - iCal' : ''}
+                        </option>
+                      );
+                    })}
                 </select>
                 {selectedCalendar?.type === 'ical' && (
                   <span className="text-[10px] text-amber-500 mt-1 block">
@@ -228,14 +249,20 @@ export const EventModal: React.FC<EventModalProps> = ({
 
               <div>
                 <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                  Gezinslid (optioneel)
+                  Persoon (optionele overschrijving)
                 </label>
                 <select
                   value={assignedTo}
                   onChange={e => setAssignedTo(e.target.value)}
                   className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
                 >
-                  <option value="">Iedereen / Geen specifiek lid</option>
+                  <option value="">
+                    Volgens agenda (
+                    {selectedCalendar
+                      ? getCalendarAssignees(selectedCalendar, familyMembers).label
+                      : 'Gezin'}
+                    )
+                  </option>
                   {familyMembers.map(m => (
                     <option key={m.id} value={m.id}>
                       {m.avatar} {m.name}
@@ -314,6 +341,25 @@ export const EventModal: React.FC<EventModalProps> = ({
                     className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono"
                   />
                 </div>
+              </div>
+            )}
+
+            {(allDay || (endDate && endDate > startDate)) && (
+              <div>
+                <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  Weergave bij meerdaagse afspraak / nachtshift
+                </label>
+                <select
+                  value={multiDayOverride}
+                  onChange={e =>
+                    setMultiDayOverride(e.target.value as 'default' | 'all_days' | 'start_day_only')
+                  }
+                  className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                >
+                  <option value="default">Volgens instelling van de agenda</option>
+                  <option value="start_day_only">Alleen op startdag tonen (bijv. nachtshift)</option>
+                  <option value="all_days">Op alle dagen tonen</option>
+                </select>
               </div>
             )}
 

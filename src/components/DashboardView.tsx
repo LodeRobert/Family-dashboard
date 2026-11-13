@@ -8,16 +8,21 @@ import {
   GeneralTask
 } from '../types';
 import { MemberAvatar } from './MemberAvatar';
+import { CalendarAssigneeBadge } from './CalendarAssigneeBadge';
 import {
   getLocalDateStr,
   isChorePeriodActiveNow,
   getChorePeriodLabel,
   getChorePeriodTimeRange,
   isChoreCompletedOnDate,
-  eventOccursOnDate,
   getEventStartDateStr,
   formatLocalDateNL
 } from '../utils/dateTime';
+import {
+  formatEventTimeDisplay,
+  resolveEventAssignees,
+  shouldEventShowOnDateList
+} from '../utils/calendarHelpers';
 import {
   Calendar as CalendarIcon,
   CheckCircle2,
@@ -106,7 +111,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
   const todayEvents = events
     .filter(evt => visibleCalendarIds.has(evt.calendarId))
-    .filter(evt => eventOccursOnDate(evt, localToday))
+    .filter(evt =>
+      shouldEventShowOnDateList(evt, calendarMap.get(evt.calendarId), localToday)
+    )
     .sort((a, b) => {
       if (Boolean(a.allDay) !== Boolean(b.allDay)) return a.allDay ? -1 : 1;
       return new Date(a.startTime).getTime() - new Date(b.startTime).getTime();
@@ -284,48 +291,29 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 const calSource = calendarMap.get(evt.calendarId);
                 const calColor = calSource?.color || evt.calendarColor || '#6366F1';
                 const calName = calSource?.name || evt.calendarName || 'Agenda';
-                const assignedMember = familyMembers.find(m => m.id === evt.assignedTo);
-
-                const startTimeFormatted = evt.allDay
-                  ? 'Hele dag'
-                  : new Intl.DateTimeFormat('nl-NL', {
-                      hour: '2-digit',
-                      minute: '2-digit',
-                      hour12: !settings.timeFormat24h
-                    }).format(new Date(evt.startTime));
-
-                const endTimeFormatted = evt.allDay
-                  ? ''
-                  : ` - ${new Intl.DateTimeFormat('nl-NL', {
-                      hour: '2-digit',
-                      minute: '2-digit',
-                      hour12: !settings.timeFormat24h
-                    }).format(new Date(evt.endTime))}`;
+                const assignees = resolveEventAssignees(evt, calSource, familyMembers);
+                const timeFormatted = formatEventTimeDisplay(
+                  evt,
+                  localToday,
+                  settings.timeFormat24h
+                );
 
                 return (
                   <div
                     key={evt.id}
                     className="p-4 hover:bg-slate-50/70 dark:hover:bg-slate-800/40 transition-colors flex items-start justify-between gap-4"
                   >
-                    <div className="flex items-start gap-3.5">
+                    <div className="flex items-start gap-3.5 min-w-0">
                       <div
                         className="w-2.5 h-2.5 rounded-full mt-1.5 shrink-0"
                         style={{ backgroundColor: calColor }}
                       />
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2 flex-wrap">
+                      <div className="space-y-1 min-w-0">
+                        <div className="flex items-center gap-2.5 flex-wrap">
                           <span className="font-semibold text-slate-900 dark:text-white text-sm">
                             {evt.title}
                           </span>
-                          {assignedMember && (
-                            <span
-                              className="inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-full font-medium text-white"
-                              style={{ backgroundColor: assignedMember.color }}
-                            >
-                              <MemberAvatar member={assignedMember} size="xs" className="border-white/80" />
-                              <span>{assignedMember.name}</span>
-                            </span>
-                          )}
+                          <CalendarAssigneeBadge assignees={assignees} compact />
                         </div>
 
                         {evt.description && (
@@ -345,8 +333,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
                     <div className="text-right shrink-0">
                       <div className="text-xs font-mono tabular-nums font-semibold text-indigo-600 dark:text-indigo-400">
-                        {startTimeFormatted}
-                        {endTimeFormatted}
+                        {timeFormatted}
                       </div>
                       <div className="text-[11px] text-slate-400 dark:text-slate-500">
                         {calName}
@@ -368,6 +355,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 {upcomingEvents.map(evt => {
                   const calSource = calendarMap.get(evt.calendarId);
                   const calColor = calSource?.color || evt.calendarColor || '#6366F1';
+                  const assignees = resolveEventAssignees(evt, calSource, familyMembers);
                   const eventDate = formatLocalDateNL(getEventStartDateStr(evt), {
                     weekday: 'short',
                     day: 'numeric',
@@ -379,11 +367,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                       key={evt.id}
                       className="p-3 bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-800 text-xs flex items-center justify-between gap-2"
                     >
-                      <div className="flex items-center gap-2 truncate">
+                      <div className="flex items-center gap-2 min-w-0">
                         <div
                           className="w-2 h-2 rounded-full shrink-0"
                           style={{ backgroundColor: calColor }}
                         />
+                        <CalendarAssigneeBadge assignees={assignees} compact showText={false} />
                         <span className="font-medium text-slate-900 dark:text-slate-100 truncate">
                           {evt.title}
                         </span>

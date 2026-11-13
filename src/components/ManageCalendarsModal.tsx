@@ -1,6 +1,14 @@
 import React, { useState } from 'react';
-import { CalendarSource } from '../types';
+import {
+  CalendarAssignmentMode,
+  CalendarMultiDayMode,
+  CalendarSource,
+  FamilyMember
+} from '../types';
 import { ColorPickerField } from './ColorPickerField';
+import { CalendarAssignmentControls } from './CalendarAssignmentControls';
+import { CalendarAssigneeBadge } from './CalendarAssigneeBadge';
+import { getCalendarAssignees } from '../utils/calendarHelpers';
 import {
   X,
   Trash2,
@@ -18,6 +26,7 @@ interface ManageCalendarsModalProps {
   isOpen: boolean;
   onClose: () => void;
   calendars: CalendarSource[];
+  familyMembers: FamilyMember[];
   onAddCalendar: (calendar: CalendarSource) => void;
   onUpdateCalendar: (calendarId: string, patch: Partial<CalendarSource>) => void;
   onDeleteCalendar: (calendarId: string) => void;
@@ -29,6 +38,7 @@ export const ManageCalendarsModal: React.FC<ManageCalendarsModalProps> = ({
   isOpen,
   onClose,
   calendars,
+  familyMembers,
   onAddCalendar,
   onUpdateCalendar,
   onDeleteCalendar,
@@ -39,6 +49,9 @@ export const ManageCalendarsModal: React.FC<ManageCalendarsModalProps> = ({
   const [icalUrl, setIcalUrl] = useState('');
   const [icalName, setIcalName] = useState('Mijn iCal Agenda');
   const [icalColor, setIcalColor] = useState('#4285F4');
+  const [icalAssignmentMode, setIcalAssignmentMode] = useState<CalendarAssignmentMode>('family');
+  const [icalMemberIds, setIcalMemberIds] = useState<string[]>([]);
+  const [icalMultiDayMode, setIcalMultiDayMode] = useState<CalendarMultiDayMode>('smart_cutoff');
   const [isTestingIcal, setIsTestingIcal] = useState(false);
   const [icalError, setIcalError] = useState('');
   const [icalSuccess, setIcalSuccess] = useState('');
@@ -47,6 +60,9 @@ export const ManageCalendarsModal: React.FC<ManageCalendarsModalProps> = ({
   const [localName, setLocalName] = useState('');
   const [localDescription, setLocalDescription] = useState('');
   const [localColor, setLocalColor] = useState('#8B5CF6');
+  const [localAssignmentMode, setLocalAssignmentMode] = useState<CalendarAssignmentMode>('family');
+  const [localMemberIds, setLocalMemberIds] = useState<string[]>([]);
+  const [localMultiDayMode, setLocalMultiDayMode] = useState<CalendarMultiDayMode>('smart_cutoff');
   const [localSuccess, setLocalSuccess] = useState('');
 
   const [isSyncing, setIsSyncing] = useState(false);
@@ -86,11 +102,17 @@ export const ManageCalendarsModal: React.FC<ManageCalendarsModalProps> = ({
         type: 'ical',
         visible: true,
         url: cleanUrl,
-        description: `iCal feed (${data.count || 0} afspraken gesynchroniseerd)`
+        description: `iCal feed (${data.count || 0} afspraken gesynchroniseerd)`,
+        assignmentMode: icalAssignmentMode,
+        memberIds: icalAssignmentMode === 'members' ? icalMemberIds : [],
+        multiDayMode: icalMultiDayMode
       };
 
       onAddCalendar(newCal);
       setIcalUrl('');
+      setIcalAssignmentMode('family');
+      setIcalMemberIds([]);
+      setIcalMultiDayMode('smart_cutoff');
       setIcalSuccess(`Agenda succesvol gekoppeld! (${data.count || 0} afspraken geladen)`);
     } catch (err: any) {
       setIcalError(err.message || 'Fout bij het ophalen van de agenda.');
@@ -109,12 +131,18 @@ export const ManageCalendarsModal: React.FC<ManageCalendarsModalProps> = ({
       color: localColor,
       type: 'local',
       visible: true,
-      description: localDescription.trim() || 'Lokale gezinsagenda'
+      description: localDescription.trim() || 'Lokale gezinsagenda',
+      assignmentMode: localAssignmentMode,
+      memberIds: localAssignmentMode === 'members' ? localMemberIds : [],
+      multiDayMode: localMultiDayMode
     };
 
     onAddCalendar(newCal);
     setLocalName('');
     setLocalDescription('');
+    setLocalAssignmentMode('family');
+    setLocalMemberIds([]);
+    setLocalMultiDayMode('smart_cutoff');
     setLocalSuccess(`Lokale agenda "${newCal.name}" toegevoegd!`);
   };
 
@@ -289,6 +317,18 @@ export const ManageCalendarsModal: React.FC<ManageCalendarsModalProps> = ({
                   onChange={setIcalColor}
                 />
 
+                <CalendarAssignmentControls
+                  familyMembers={familyMembers}
+                  assignmentMode={icalAssignmentMode}
+                  memberIds={icalMemberIds}
+                  multiDayMode={icalMultiDayMode}
+                  onChangeAssignment={(mode, ids) => {
+                    setIcalAssignmentMode(mode);
+                    setIcalMemberIds(ids);
+                  }}
+                  onChangeMultiDayMode={setIcalMultiDayMode}
+                />
+
                 <div className="pt-1 flex justify-end">
                   <button
                     type="submit"
@@ -362,6 +402,18 @@ export const ManageCalendarsModal: React.FC<ManageCalendarsModalProps> = ({
                   onChange={setLocalColor}
                 />
 
+                <CalendarAssignmentControls
+                  familyMembers={familyMembers}
+                  assignmentMode={localAssignmentMode}
+                  memberIds={localMemberIds}
+                  multiDayMode={localMultiDayMode}
+                  onChangeAssignment={(mode, ids) => {
+                    setLocalAssignmentMode(mode);
+                    setLocalMemberIds(ids);
+                  }}
+                  onChangeMultiDayMode={setLocalMultiDayMode}
+                />
+
                 <div className="pt-1 flex justify-end">
                   <button
                     type="submit"
@@ -374,62 +426,89 @@ export const ManageCalendarsModal: React.FC<ManageCalendarsModalProps> = ({
             </div>
           )}
 
-          {/* TAB 3: ALL ACTIVE CALENDARS + FULL SPECTRUM COLOR EDITOR */}
+          {/* TAB 3: ALL ACTIVE CALENDARS + FULL SPECTRUM COLOR & PERSON EDITOR */}
           {activeTab === 'all' && (
             <div className="space-y-3">
               <h4 className="font-bold text-sm text-slate-900 dark:text-white">
-                Alle gekoppelde agenda's (pas naam of kleur aan):
+                Alle gekoppelde agenda's (pas naam, kleur, personen en nachtshift-weergave aan):
               </h4>
 
-              <div className="space-y-2.5">
-                {calendars.map(cal => (
-                  <div
-                    key={cal.id}
-                    className="p-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
-                  >
-                    <div className="flex items-center gap-3 flex-1 min-w-0">
-                      <ColorPickerField
-                        value={cal.color}
-                        onChange={color => onUpdateCalendar(cal.id, { color })}
-                        compact
-                      />
+              <div className="space-y-3">
+                {calendars.map(cal => {
+                  const assignees = getCalendarAssignees(cal, familyMembers);
+                  return (
+                    <div
+                      key={cal.id}
+                      className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 space-y-3"
+                    >
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div className="flex items-center gap-3 flex-1 min-w-0">
+                          <ColorPickerField
+                            value={cal.color}
+                            onChange={color => onUpdateCalendar(cal.id, { color })}
+                            compact
+                          />
 
-                      <div className="min-w-0 flex-1">
-                        <input
-                          type="text"
-                          value={cal.name}
-                          onChange={e => onUpdateCalendar(cal.id, { name: e.target.value })}
-                          className="font-semibold text-slate-900 dark:text-white bg-transparent border-b border-transparent focus:border-indigo-400 focus:outline-none w-full"
-                        />
-                        <div className="text-[11px] text-slate-500 truncate">
-                          {cal.type === 'ical' ? 'iCal Feed' : 'Lokale agenda'}
-                          {cal.description ? ` · ${cal.description}` : ''}
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <input
+                                type="text"
+                                value={cal.name}
+                                onChange={e => onUpdateCalendar(cal.id, { name: e.target.value })}
+                                className="font-semibold text-slate-900 dark:text-white bg-transparent border-b border-transparent focus:border-indigo-400 focus:outline-none min-w-[140px] flex-1"
+                              />
+                              <CalendarAssigneeBadge assignees={assignees} />
+                            </div>
+                            <div className="text-[11px] text-slate-500 truncate mt-0.5">
+                              {cal.type === 'ical' ? 'iCal Feed' : 'Lokale agenda'}
+                              {cal.description ? ` · ${cal.description}` : ''}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => onToggleVisibility(cal.id)}
+                            className="px-2.5 py-1 text-xs font-medium rounded border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300"
+                          >
+                            {cal.visible ? 'Zichtbaar' : 'Verborgen'}
+                          </button>
+
+                          {calendars.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={() => onDeleteCalendar(cal.id)}
+                              className="p-1.5 text-slate-400 hover:text-red-600 rounded transition-colors"
+                              title="Agenda ontkoppelen"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
                         </div>
                       </div>
-                    </div>
 
-                    <div className="flex items-center gap-2 shrink-0">
-                      <button
-                        type="button"
-                        onClick={() => onToggleVisibility(cal.id)}
-                        className="px-2.5 py-1 text-xs font-medium rounded border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300"
-                      >
-                        {cal.visible ? 'Zichtbaar' : 'Verborgen'}
-                      </button>
-
-                      {calendars.length > 1 && (
-                        <button
-                          type="button"
-                          onClick={() => onDeleteCalendar(cal.id)}
-                          className="p-1.5 text-slate-400 hover:text-red-600 rounded transition-colors"
-                          title="Agenda ontkoppelen"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      )}
+                      <div className="pt-2.5 border-t border-slate-100 dark:border-slate-800">
+                        <CalendarAssignmentControls
+                          compact
+                          familyMembers={familyMembers}
+                          assignmentMode={
+                            cal.assignmentMode ||
+                            (cal.memberIds && cal.memberIds.length > 0 ? 'members' : 'family')
+                          }
+                          memberIds={cal.memberIds || []}
+                          multiDayMode={cal.multiDayMode || 'smart_cutoff'}
+                          onChangeAssignment={(mode, ids) =>
+                            onUpdateCalendar(cal.id, { assignmentMode: mode, memberIds: ids })
+                          }
+                          onChangeMultiDayMode={mode =>
+                            onUpdateCalendar(cal.id, { multiDayMode: mode })
+                          }
+                        />
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}

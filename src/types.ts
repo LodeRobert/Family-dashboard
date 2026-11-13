@@ -1,4 +1,6 @@
 export type CalendarType = 'local' | 'ical';
+export type CalendarAssignmentMode = 'family' | 'members';
+export type CalendarMultiDayMode = 'smart_cutoff' | 'start_day_only' | 'all_days';
 
 export interface CalendarSource {
   id: string;
@@ -9,6 +11,9 @@ export interface CalendarSource {
   description?: string;
   url?: string; // For iCal feeds
   isReadOnly?: boolean;
+  assignmentMode?: CalendarAssignmentMode; // 'family' = volledige gezin, 'members' = 1 of meer gezinsleden
+  memberIds?: string[]; // Gekoppelde gezinsleden (bijv. 1 ouder, of 2 kinderen samen)
+  multiDayMode?: CalendarMultiDayMode; // Hoe meerdaagse & nacht-events worden getoond
 }
 
 export interface CalendarEvent {
@@ -19,11 +24,12 @@ export interface CalendarEvent {
   startTime: string; // ISO string
   endTime: string; // ISO string
   allDay?: boolean;
-  assignedTo?: string; // FamilyMember ID
+  assignedTo?: string; // Optional single FamilyMember override
   location?: string;
   calendarName?: string;
   calendarColor?: string;
   isExternal?: boolean;
+  multiDayOverride?: 'default' | 'all_days' | 'start_day_only';
 }
 
 export interface FamilyMember {

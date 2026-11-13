@@ -17,7 +17,10 @@ const FALLBACK_DEFAULT_STATE: AppState = {
       color: '#6366F1',
       type: 'local',
       visible: true,
-      description: 'Gezamenlijke afspraken en uitjes'
+      description: 'Gezamenlijke afspraken en uitjes',
+      assignmentMode: 'family',
+      memberIds: [],
+      multiDayMode: 'smart_cutoff'
     },
     {
       id: 'cal-school',
@@ -25,7 +28,10 @@ const FALLBACK_DEFAULT_STATE: AppState = {
       color: '#10B981',
       type: 'local',
       visible: true,
-      description: 'Lessen, trainingen en wedstrijden'
+      description: 'Lessen, trainingen en wedstrijden',
+      assignmentMode: 'members',
+      memberIds: ['fam-3', 'fam-4'],
+      multiDayMode: 'smart_cutoff'
     }
   ],
   events: [
@@ -142,7 +148,16 @@ const FALLBACK_DEFAULT_STATE: AppState = {
 
 function normalizeState(raw: any): AppState {
   const rawCalendars = Array.isArray(raw?.calendars)
-    ? raw.calendars.filter((c: any) => c.type !== 'google_oauth')
+    ? raw.calendars
+        .filter((c: any) => c.type !== 'google_oauth')
+        .map((c: any) => ({
+          ...c,
+          assignmentMode:
+            c.assignmentMode ||
+            (Array.isArray(c.memberIds) && c.memberIds.length > 0 ? 'members' : 'family'),
+          memberIds: Array.isArray(c.memberIds) ? c.memberIds : [],
+          multiDayMode: c.multiDayMode || 'smart_cutoff'
+        }))
     : FALLBACK_DEFAULT_STATE.calendars;
 
   let choreCompletionsByDate = raw?.choreCompletionsByDate;

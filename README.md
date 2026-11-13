@@ -7,10 +7,11 @@
 ## ✨ Functionaliteiten
 
 - 📅 **Interactieve Kalender (iCal & Lokale Agenda's)**:
-  - Bekijk al je gezins- en werkagenda's in **Dag-**, **Week-**, **Maand-** en **Agendalijst-weergave** (standaard vanaf vandaag met optie om het verleden te bekijken, inclusief duidelijke **Hele dag** weergave en exacte datum + tijd).
-  - **Volledig kleurenspectrum**: Kies voor elke lokale of iCal-agenda een eigen kleur uit het volledige kleurenspectrum en maak onbeperkt lokale agenda's aan.
+  - Bekijk al je gezins- en werkagenda's in **Dag-**, **Week- (Google-stijl urenrooster 00:00–23:00)**, **Maand-** en **Agendalijst-weergave** (standaard vanaf vandaag met optie om het verleden te bekijken).
+  - **Agenda's koppelen aan 1 persoon, meerdere personen of het volledige gezin**: Koppel onbeperkt aparte agenda's (bijv. *Werk*, *Brandweer* en *Privé* aan één ouder, *Sport* aan 2 kinderen samen of apart, en *Gezinsagenda* aan het hele gezin) met duidelijke avatars, filterknoppen per persoon en vrije kleurkeuze uit het volledige kleurenspectrum.
+  - **Slimme nachtshift- & meerdaagse weergave**: Kies per agenda (of per afspraak) hoe nachtshiften (bijv. 19:00–07:00) en meerdaagse events worden getoond: *Slim* (nachtshift op startdag in lijsten, doorlopend in het urenrooster), *Alleen op startdag* of *Op alle dagen tonen*.
   - **Agenda's koppelen via iCal**: Koppel eenvoudig elke Google-, Apple- of Outlook-agenda via de geheime iCal-link (`.ics`) met volledige ondersteuning voor terugkerende afspraken (`RRULE`), tijdzones en meerdaagse/hele-dag events — werkt op elk lokaal netwerk zonder cloud-account.
-  - **Afspraken toevoegen & bewerken**: Voeg eenvoudig lokale afspraken toe met titel, datum, tijden, gekoppeld gezinslid, locatie en beschrijving.
+  - **Afspraken toevoegen & bewerken**: Voeg eenvoudig lokale afspraken toe met titel, datum, tijden, gekoppeld gezinslid, locatie en beschrijving (of klik direct op een uurvak in het weekrooster).
 - ⭐ **Takenbord & Sterrenlijst (Beloningen)**:
   - **Dagroutines op moment van de dag**: Taken voor **Ochtend** (00:00–12:00), **Middag** (12:00–18:00), **Avond** (18:00–00:00) of **Hele dag** (altijd af te vinken). Elke dag start automatisch om **00:00** opnieuw, en voorbije dagen blijven achteraf aanpasbaar.
   - **Sterrenlijst & Historiek**: Overzichtelijke lijstweergave per persoon waarop je precies ziet wanneer en door welke taak of reden sterren zijn behaald, aangepast of ingewisseld.

@@ -219,7 +219,16 @@ export default function App() {
       ...prev,
       familyMembers: members,
       chores: prev.chores.filter(c => validIds.has(c.memberId)),
-      starLogs: prev.starLogs.filter(l => validIds.has(l.memberId))
+      starLogs: prev.starLogs.filter(l => validIds.has(l.memberId)),
+      calendars: prev.calendars.map(cal => {
+        if (!Array.isArray(cal.memberIds) || cal.memberIds.length === 0) return cal;
+        const remainingIds = cal.memberIds.filter(id => validIds.has(id));
+        return {
+          ...cal,
+          memberIds: remainingIds,
+          assignmentMode: remainingIds.length > 0 ? cal.assignmentMode || 'members' : 'family'
+        };
+      })
     }));
   };
 
@@ -840,6 +849,7 @@ export default function App() {
             events={combinedEvents}
             calendars={appState.calendars}
             familyMembers={appState.familyMembers}
+            timeFormat24h={appState.settings.timeFormat24h}
             onOpenNewEvent={handleOpenNewEvent}
             onSelectEvent={handleSelectEvent}
             onOpenManageCalendars={() => setIsManageCalendarsOpen(true)}
@@ -928,6 +938,7 @@ export default function App() {
         isOpen={isManageCalendarsOpen}
         onClose={() => setIsManageCalendarsOpen(false)}
         calendars={appState.calendars}
+        familyMembers={appState.familyMembers}
         onAddCalendar={handleAddCalendar}
         onUpdateCalendar={handleUpdateCalendar}
         onDeleteCalendar={handleDeleteCalendar}

@@ -68,7 +68,10 @@ const DEFAULT_INITIAL_STATE = {
       color: '#6366F1',
       type: 'local',
       visible: true,
-      description: 'Gezamenlijke afspraken en uitjes'
+      description: 'Gezamenlijke afspraken en uitjes',
+      assignmentMode: 'family',
+      memberIds: [],
+      multiDayMode: 'smart_cutoff'
     },
     {
       id: 'cal-school',
@@ -76,7 +79,10 @@ const DEFAULT_INITIAL_STATE = {
       color: '#10B981',
       type: 'local',
       visible: true,
-      description: 'Lessen, trainingen en wedstrijden'
+      description: 'Lessen, trainingen en wedstrijden',
+      assignmentMode: 'members',
+      memberIds: ['fam-3', 'fam-4'],
+      multiDayMode: 'smart_cutoff'
     }
   ],
   events: [
