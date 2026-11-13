@@ -457,7 +457,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                             borderLeftColor: liveColor,
                             backgroundColor: hexToRgba(liveColor, evt.allDay ? 0.16 : 0.1)
                           }}
-                          className="px-1.5 py-0.5 rounded text-[11px] font-medium border-l-3 transition-colors flex items-center justify-between gap-1"
+                          className="px-1.5 py-0.5 rounded text-[11px] font-medium border-l-3 transition-all cursor-pointer hover:brightness-95 flex items-center justify-between gap-1"
                           title={`${timeLabel} · ${evt.title} (${assignees.label})`}
                         >
                           <div className="truncate min-w-0 text-slate-900 dark:text-slate-100">

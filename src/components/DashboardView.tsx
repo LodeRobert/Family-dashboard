@@ -53,6 +53,7 @@ interface DashboardViewProps {
   settings: AppSettings;
   todayStr: string;
   onOpenNewEvent: () => void;
+  onSelectEvent?: (event: CalendarEvent) => void;
   onNavigateToCalendar: () => void;
   onNavigateToChores: () => void;
   onNavigateToTasks: () => void;
@@ -71,6 +72,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   settings,
   todayStr,
   onOpenNewEvent,
+  onSelectEvent,
   onNavigateToCalendar,
   onNavigateToChores,
   onNavigateToTasks,
@@ -299,9 +301,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 );
 
                 return (
-                  <div
+                  <button
                     key={evt.id}
-                    className="p-4 hover:bg-slate-50/70 dark:hover:bg-slate-800/40 transition-colors flex items-start justify-between gap-4"
+                    type="button"
+                    onClick={() => onSelectEvent?.(evt)}
+                    className="w-full text-left p-4 hover:bg-slate-50/70 dark:hover:bg-slate-800/40 transition-colors flex items-start justify-between gap-4 cursor-pointer"
                   >
                     <div className="flex items-start gap-3.5 min-w-0">
                       <div
@@ -339,7 +343,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                         {calName}
                       </div>
                     </div>
-                  </div>
+                  </button>
                 );
               })
             )}
@@ -363,9 +367,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   });
 
                   return (
-                    <div
+                    <button
                       key={evt.id}
-                      className="p-3 bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-800 text-xs flex items-center justify-between gap-2"
+                      type="button"
+                      onClick={() => onSelectEvent?.(evt)}
+                      className="w-full text-left p-3 bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-800 hover:border-indigo-300 dark:hover:border-indigo-700 transition-colors text-xs flex items-center justify-between gap-2 cursor-pointer"
                     >
                       <div className="flex items-center gap-2 min-w-0">
                         <div
@@ -381,7 +387,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                         {eventDate}
                         {evt.allDay ? ' · Hele dag' : ''}
                       </span>
-                    </div>
+                    </button>
                   );
                 })}
               </div>

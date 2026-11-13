@@ -23,6 +23,7 @@ import {
   SettingsLockScreen
 } from './components/SettingsAuthModals';
 import { EventModal } from './components/EventModal';
+import { EventDetailsModal } from './components/EventDetailsModal';
 import { ManageCalendarsModal } from './components/ManageCalendarsModal';
 import {
   loadAppState,
@@ -50,6 +51,7 @@ export default function App() {
   // Modals state
   const [isEventModalOpen, setIsEventModalOpen] = useState(false);
   const [editingEvent, setEditingEvent] = useState<CalendarEvent | null>(null);
+  const [viewingEvent, setViewingEvent] = useState<CalendarEvent | null>(null);
   const [initialDateForModal, setInitialDateForModal] = useState<string | undefined>(undefined);
   const [isManageCalendarsOpen, setIsManageCalendarsOpen] = useState(false);
 
@@ -405,9 +407,7 @@ export default function App() {
   };
 
   const handleSelectEvent = (event: CalendarEvent) => {
-    if (event.isExternal) return; // iCal events are read-only
-    setEditingEvent(event);
-    setIsEventModalOpen(true);
+    setViewingEvent(event);
   };
 
   const handleSaveEvent = async (eventData: Partial<CalendarEvent>) => {
@@ -835,6 +835,7 @@ export default function App() {
             settings={appState.settings}
             todayStr={todayStr}
             onOpenNewEvent={handleOpenNewEvent}
+            onSelectEvent={handleSelectEvent}
             onNavigateToCalendar={() => setCurrentTab('calendar')}
             onNavigateToChores={() => setCurrentTab('chores')}
             onNavigateToTasks={() => setCurrentTab('tasks')}
@@ -920,6 +921,23 @@ export default function App() {
       )}
 
       {/* Modals */}
+      <EventDetailsModal
+        event={viewingEvent}
+        calendar={
+          viewingEvent
+            ? appState.calendars.find(c => c.id === viewingEvent.calendarId)
+            : undefined
+        }
+        familyMembers={appState.familyMembers}
+        timeFormat24h={appState.settings.timeFormat24h}
+        onClose={() => setViewingEvent(null)}
+        onEdit={evt => {
+          setViewingEvent(null);
+          setEditingEvent(evt);
+          setIsEventModalOpen(true);
+        }}
+      />
+
       <EventModal
         isOpen={isEventModalOpen}
         onClose={() => {
