@@ -97,6 +97,7 @@ const FALLBACK_DEFAULT_STATE: AppState = {
   choreCompletionsByDate: {},
   starLogs: [],
   starLogsReconciled: true,
+  taskLists: ['Algemeen', 'Boodschappen', 'Herinneringen', "To-do's"],
   generalTasks: [
     {
       id: 'gt-1',
@@ -183,6 +184,19 @@ function normalizeState(raw: any): AppState {
     }
   }
 
+  const generalTasks = Array.isArray(raw?.generalTasks)
+    ? raw.generalTasks
+    : FALLBACK_DEFAULT_STATE.generalTasks;
+  const baseLists = Array.isArray(raw?.taskLists)
+    ? raw.taskLists
+    : FALLBACK_DEFAULT_STATE.taskLists || ['Algemeen', 'Boodschappen', 'Herinneringen', "To-do's"];
+  const taskLists = Array.from(
+    new Set([
+      ...baseLists,
+      ...generalTasks.map((t: any) => t?.listName).filter(Boolean)
+    ])
+  );
+
   return {
     ...FALLBACK_DEFAULT_STATE,
     ...raw,
@@ -191,9 +205,8 @@ function normalizeState(raw: any): AppState {
     choreCompletionsByDate,
     starLogs,
     starLogsReconciled: true,
-    generalTasks: Array.isArray(raw?.generalTasks)
-      ? raw.generalTasks
-      : FALLBACK_DEFAULT_STATE.generalTasks,
+    taskLists,
+    generalTasks,
     settings: {
       ...FALLBACK_DEFAULT_STATE.settings,
       ...(raw?.settings || {})

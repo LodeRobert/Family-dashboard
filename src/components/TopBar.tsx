@@ -4,6 +4,7 @@ import {
   LayoutDashboard,
   CalendarDays,
   Sparkles,
+  ListTodo,
   Settings,
   Plus,
   Maximize2,
@@ -90,6 +91,18 @@ export const TopBar: React.FC<TopBarProps> = ({
             >
               <Sparkles className="w-4 h-4 shrink-0" />
               <span>Takenbord</span>
+            </button>
+
+            <button
+              onClick={() => onTabChange('tasks')}
+              className={`flex items-center gap-2 px-3 lg:px-4 py-2 text-sm font-medium rounded-lg transition-colors whitespace-nowrap shrink-0 ${
+                currentTab === 'tasks'
+                  ? 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 font-semibold shadow-xs'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800/60'
+              }`}
+            >
+              <ListTodo className="w-4 h-4 shrink-0" />
+              <span>Takenlijsten</span>
             </button>
 
             <button

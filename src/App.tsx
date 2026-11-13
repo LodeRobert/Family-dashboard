@@ -16,6 +16,7 @@ import { BottomNavBar } from './components/BottomNavBar';
 import { DashboardView } from './components/DashboardView';
 import { CalendarView } from './components/CalendarView';
 import { ChoresView } from './components/ChoresView';
+import { GeneralTasksView } from './components/GeneralTasksView';
 import { SettingsView } from './components/SettingsView';
 import {
   FirstTimePasswordModal,
@@ -616,7 +617,32 @@ export default function App() {
     });
   };
 
-  // General Tasks Handlers
+  // General Task Lists & Tasks Handlers
+  const handleAddTaskList = async (name: string) => {
+    const cleaned = name.trim();
+    if (!cleaned) return;
+    await updateStateAndPersist(prev => {
+      const existing = prev.taskLists || ['Algemeen', 'Boodschappen', 'Herinneringen', "To-do's"];
+      if (existing.includes(cleaned)) return prev;
+      return {
+        ...prev,
+        taskLists: [...existing, cleaned]
+      };
+    });
+  };
+
+  const handleDeleteTaskList = async (name: string) => {
+    await updateStateAndPersist(prev => {
+      const existing = prev.taskLists || ['Algemeen', 'Boodschappen', 'Herinneringen', "To-do's"];
+      const remaining = existing.filter(l => l !== name);
+      return {
+        ...prev,
+        taskLists: remaining.length > 0 ? remaining : ['Algemeen'],
+        generalTasks: prev.generalTasks.filter(t => t.listName !== name)
+      };
+    });
+  };
+
   const handleAddGeneralTask = async (
     taskData: Omit<GeneralTask, 'id' | 'completed' | 'createdAt'>
   ) => {
@@ -626,9 +652,23 @@ export default function App() {
       completed: false,
       createdAt: new Date().toISOString()
     };
+    await updateStateAndPersist(prev => {
+      const existingLists = prev.taskLists || ['Algemeen', 'Boodschappen', 'Herinneringen', "To-do's"];
+      const nextLists = existingLists.includes(newTask.listName)
+        ? existingLists
+        : [...existingLists, newTask.listName];
+      return {
+        ...prev,
+        taskLists: nextLists,
+        generalTasks: [newTask, ...prev.generalTasks]
+      };
+    });
+  };
+
+  const handleUpdateGeneralTask = async (taskId: string, patch: Partial<GeneralTask>) => {
     await updateStateAndPersist(prev => ({
       ...prev,
-      generalTasks: [newTask, ...prev.generalTasks]
+      generalTasks: prev.generalTasks.map(t => (t.id === taskId ? { ...t, ...patch } : t))
     }));
   };
 
@@ -654,10 +694,14 @@ export default function App() {
     }));
   };
 
-  const handleClearCompletedGeneralTasks = async () => {
+  const handleClearCompletedGeneralTasks = async (listName?: string) => {
     await updateStateAndPersist(prev => ({
       ...prev,
-      generalTasks: prev.generalTasks.filter(t => !t.completed)
+      generalTasks: prev.generalTasks.filter(t => {
+        if (!t.completed) return true;
+        if (listName && t.listName !== listName) return true;
+        return false;
+      })
     }));
   };
 
@@ -742,7 +786,15 @@ export default function App() {
               currentTab === 'chores' ? 'bg-indigo-600 text-white font-bold' : 'text-slate-300'
             }`}
           >
-            Taken
+            Sterren
+          </button>
+          <button
+            onClick={() => setCurrentTab('tasks')}
+            className={`px-2.5 py-1 rounded-md transition-colors ${
+              currentTab === 'tasks' ? 'bg-indigo-600 text-white font-bold' : 'text-slate-300'
+            }`}
+          >
+            Takenlijsten
           </button>
           <button
             onClick={toggleDarkMode}
@@ -776,6 +828,7 @@ export default function App() {
             onOpenNewEvent={handleOpenNewEvent}
             onNavigateToCalendar={() => setCurrentTab('calendar')}
             onNavigateToChores={() => setCurrentTab('chores')}
+            onNavigateToTasks={() => setCurrentTab('tasks')}
             onNavigateToSettings={() => setCurrentTab('settings')}
             onToggleChore={handleToggleChore}
             onToggleGeneralTask={handleToggleGeneralTask}
@@ -799,7 +852,6 @@ export default function App() {
             chores={appState.chores}
             choreCompletionsByDate={appState.choreCompletionsByDate}
             starLogs={appState.starLogs}
-            generalTasks={appState.generalTasks}
             familyMembers={appState.familyMembers}
             rewards={appState.rewards}
             todayStr={todayStr}
@@ -808,11 +860,22 @@ export default function App() {
             onDeleteChore={handleDeleteChore}
             onAddReward={handleAddReward}
             onClaimReward={handleClaimReward}
+            onNavigateToSettings={() => setCurrentTab('settings')}
+          />
+        )}
+
+        {currentTab === 'tasks' && (
+          <GeneralTasksView
+            taskLists={appState.taskLists || ['Algemeen', 'Boodschappen', 'Herinneringen', "To-do's"]}
+            generalTasks={appState.generalTasks}
+            familyMembers={appState.familyMembers}
+            onAddTaskList={handleAddTaskList}
+            onDeleteTaskList={handleDeleteTaskList}
             onAddGeneralTask={handleAddGeneralTask}
+            onUpdateGeneralTask={handleUpdateGeneralTask}
             onToggleGeneralTask={handleToggleGeneralTask}
             onDeleteGeneralTask={handleDeleteGeneralTask}
             onClearCompletedGeneralTasks={handleClearCompletedGeneralTasks}
-            onNavigateToSettings={() => setCurrentTab('settings')}
           />
         )}
 

@@ -106,12 +106,13 @@ export interface AppState {
   choreCompletionsByDate: Record<string, string[]>; // Local YYYY-MM-DD -> completed chore IDs
   starLogs: StarLogEntry[];
   starLogsReconciled?: boolean;
+  taskLists?: string[];
   generalTasks: GeneralTask[];
   rewards: RewardItem[];
   settings: AppSettings;
 }
 
-export type ViewTab = 'dashboard' | 'calendar' | 'chores' | 'settings';
+export type ViewTab = 'dashboard' | 'calendar' | 'chores' | 'tasks' | 'settings';
 export type CalendarViewMode = 'day' | 'week' | 'month' | 'agenda';
 
 export interface WeatherLocationResult {

@@ -4,12 +4,10 @@ import {
   FamilyMember,
   RewardItem,
   ChorePeriod,
-  StarLogEntry,
-  GeneralTask
+  StarLogEntry
 } from '../types';
 import { MemberAvatar } from './MemberAvatar';
 import {
-  getLocalDateStr,
   shiftLocalDateStr,
   formatLocalDateNL,
   getCurrentDayPeriod,
@@ -28,13 +26,11 @@ import {
   Moon,
   Trash2,
   Trophy,
-  ListTodo,
   Clock,
   Lock,
   ChevronLeft,
   ChevronRight,
   History,
-  CheckSquare,
   List
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
@@ -43,7 +39,6 @@ interface ChoresViewProps {
   chores: Chore[];
   choreCompletionsByDate: Record<string, string[]>;
   starLogs: StarLogEntry[];
-  generalTasks: GeneralTask[];
   familyMembers: FamilyMember[];
   rewards: RewardItem[];
   todayStr: string;
@@ -52,20 +47,15 @@ interface ChoresViewProps {
   onDeleteChore: (choreId: string) => void;
   onAddReward: (reward: Omit<RewardItem, 'id' | 'claimedCount'>) => void;
   onClaimReward: (rewardId: string, memberId: string) => void;
-  onAddGeneralTask: (task: Omit<GeneralTask, 'id' | 'completed' | 'createdAt'>) => void;
-  onToggleGeneralTask: (taskId: string) => void;
-  onDeleteGeneralTask: (taskId: string) => void;
-  onClearCompletedGeneralTasks: () => void;
   onNavigateToSettings?: () => void;
 }
 
-type ChoresSubTab = 'routines' | 'star_list' | 'general_tasks';
+type ChoresSubTab = 'routines' | 'star_list';
 
 export const ChoresView: React.FC<ChoresViewProps> = ({
   chores,
   choreCompletionsByDate,
   starLogs,
-  generalTasks,
   familyMembers,
   rewards,
   todayStr,
@@ -74,10 +64,6 @@ export const ChoresView: React.FC<ChoresViewProps> = ({
   onDeleteChore,
   onAddReward,
   onClaimReward,
-  onAddGeneralTask,
-  onToggleGeneralTask,
-  onDeleteGeneralTask,
-  onClearCompletedGeneralTasks,
   onNavigateToSettings
 }) => {
   const [subTab, setSubTab] = useState<ChoresSubTab>('routines');
@@ -106,16 +92,6 @@ export const ChoresView: React.FC<ChoresViewProps> = ({
   // Star list state
   const [starListMemberFilter, setStarListMemberFilter] = useState<string>('all');
   const [starListTypeFilter, setStarListTypeFilter] = useState<'all' | 'chore' | 'manual_adjustment' | 'reward_claim'>('all');
-
-  // General Tasks state (Google Tasks replacement)
-  const [selectedListFilter, setSelectedListFilter] = useState<string>('ALL');
-  const [showCompletedTasks, setShowCompletedTasks] = useState<boolean>(true);
-  const [newTaskTitle, setNewTaskTitle] = useState('');
-  const [newTaskNotes, setNewTaskNotes] = useState('');
-  const [newTaskListName, setNewTaskListName] = useState('Algemeen');
-  const [newTaskDueDate, setNewTaskDueDate] = useState('');
-  const [newTaskAssignedTo, setNewTaskAssignedTo] = useState('');
-  const [newTaskPriority, setNewTaskPriority] = useState<'low' | 'normal' | 'high'>('normal');
 
   // Keep current time ticking every 30s so time-of-day routine locks update cleanly
   useEffect(() => {
@@ -235,41 +211,6 @@ export const ChoresView: React.FC<ChoresViewProps> = ({
     {}
   );
   const starLogDatesDesc = Object.keys(groupedStarLogsByDate).sort((a, b) => b.localeCompare(a));
-
-  // --- General Tasks helpers ---
-  const uniqueTaskLists = Array.from(
-    new Set(['Algemeen', 'Boodschappen', 'Klusjes', ...generalTasks.map(t => t.listName)])
-  );
-
-  const visibleGeneralTasks = generalTasks
-    .filter(t => selectedListFilter === 'ALL' || t.listName === selectedListFilter)
-    .filter(t => showCompletedTasks || !t.completed)
-    .sort((a, b) => {
-      if (a.completed !== b.completed) return a.completed ? 1 : -1;
-      const prioOrder = { high: 0, normal: 1, low: 2 };
-      if (prioOrder[a.priority] !== prioOrder[b.priority]) {
-        return prioOrder[a.priority] - prioOrder[b.priority];
-      }
-      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-    });
-
-  const handleAddGeneralTaskSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newTaskTitle.trim()) return;
-
-    onAddGeneralTask({
-      title: newTaskTitle.trim(),
-      notes: newTaskNotes.trim() || undefined,
-      listName: newTaskListName.trim() || 'Algemeen',
-      dueDate: newTaskDueDate || undefined,
-      assignedTo: newTaskAssignedTo || undefined,
-      priority: newTaskPriority
-    });
-
-    setNewTaskTitle('');
-    setNewTaskNotes('');
-    setNewTaskDueDate('');
-  };
 
   // --- Render Period Column Helper ---
   const renderPeriodCard = (
@@ -420,19 +361,6 @@ export const ChoresView: React.FC<ChoresViewProps> = ({
         >
           <List className="w-4 h-4" />
           <span>Sterrenlijst & Historiek</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setSubTab('general_tasks')}
-          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-semibold transition-all whitespace-nowrap ${
-            subTab === 'general_tasks'
-              ? 'bg-indigo-600 text-white shadow-xs'
-              : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
-          }`}
-        >
-          <ListTodo className="w-4 h-4" />
-          <span>Algemene Taken ({generalTasks.filter(t => !t.completed).length})</span>
         </button>
       </div>
 
@@ -919,268 +847,6 @@ export const ChoresView: React.FC<ChoresViewProps> = ({
         </div>
       )}
 
-      {/* ===================================================================== */}
-      {/* SUB-TAB 3: ALGEMENE TAKEN (Volledig lokale Google Tasks vervanger)    */}
-      {/* ===================================================================== */}
-      {subTab === 'general_tasks' && (
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
-          {/* Left: Add General Task Form */}
-          <div className="lg:col-span-4 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 shadow-xs space-y-4 h-fit">
-            <div className="flex items-center gap-2 border-b border-slate-100 dark:border-slate-800 pb-3">
-              <CheckSquare className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
-              <div>
-                <h3 className="text-base font-bold text-slate-900 dark:text-white">
-                  Nieuwe algemene taak
-                </h3>
-                <p className="text-xs text-slate-500">
-                  Boodschappen, klusjes en to-do's lokaal in HomeBoard
-                </p>
-              </div>
-            </div>
-
-            <form onSubmit={handleAddGeneralTaskSubmit} className="space-y-3 text-xs">
-              <div>
-                <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                  Wat moet er gebeuren? *
-                </label>
-                <input
-                  type="text"
-                  value={newTaskTitle}
-                  onChange={e => setNewTaskTitle(e.target.value)}
-                  placeholder="bijv. Pakketje afhalen, Melk kopen, Garage opruimen"
-                  className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm"
-                  required
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-2.5">
-                <div>
-                  <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                    Lijst / Categorie
-                  </label>
-                  <input
-                    type="text"
-                    list="general-task-lists"
-                    value={newTaskListName}
-                    onChange={e => setNewTaskListName(e.target.value)}
-                    placeholder="Algemeen"
-                    className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800"
-                  />
-                  <datalist id="general-task-lists">
-                    {uniqueTaskLists.map(l => (
-                      <option key={l} value={l} />
-                    ))}
-                  </datalist>
-                </div>
-
-                <div>
-                  <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                    Prioriteit
-                  </label>
-                  <select
-                    value={newTaskPriority}
-                    onChange={e =>
-                      setNewTaskPriority(e.target.value as 'low' | 'normal' | 'high')
-                    }
-                    className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800"
-                  >
-                    <option value="normal">Normaal</option>
-                    <option value="high">Belangrijk (!)</option>
-                    <option value="low">Laag</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-2.5">
-                <div>
-                  <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                    Vervaldatum (optioneel)
-                  </label>
-                  <input
-                    type="date"
-                    value={newTaskDueDate}
-                    onChange={e => setNewTaskDueDate(e.target.value)}
-                    className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 font-mono"
-                  />
-                </div>
-
-                <div>
-                  <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                    Voor wie? (optioneel)
-                  </label>
-                  <select
-                    value={newTaskAssignedTo}
-                    onChange={e => setNewTaskAssignedTo(e.target.value)}
-                    className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800"
-                  >
-                    <option value="">Iedereen</option>
-                    {familyMembers.map(m => (
-                      <option key={m.id} value={m.id}>
-                        {m.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              <div>
-                <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                  Notities (optioneel)
-                </label>
-                <textarea
-                  value={newTaskNotes}
-                  onChange={e => setNewTaskNotes(e.target.value)}
-                  rows={2}
-                  placeholder="Extra details..."
-                  className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800"
-                />
-              </div>
-
-              <button
-                type="submit"
-                className="w-full py-2.5 px-4 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-xl shadow-xs transition-colors"
-              >
-                + Taak toevoegen
-              </button>
-            </form>
-          </div>
-
-          {/* Right: Lists Filter & General Tasks */}
-          <div className="lg:col-span-8 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 shadow-xs space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-3">
-              <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs">
-                <button
-                  type="button"
-                  onClick={() => setSelectedListFilter('ALL')}
-                  className={`px-3 py-1.5 rounded-lg font-semibold whitespace-nowrap ${
-                    selectedListFilter === 'ALL'
-                      ? 'bg-indigo-600 text-white'
-                      : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
-                  }`}
-                >
-                  Alles ({generalTasks.filter(t => !t.completed).length})
-                </button>
-                {uniqueTaskLists.map(list => (
-                  <button
-                    type="button"
-                    key={list}
-                    onClick={() => setSelectedListFilter(list)}
-                    className={`px-3 py-1.5 rounded-lg font-semibold whitespace-nowrap ${
-                      selectedListFilter === list
-                        ? 'bg-indigo-600 text-white'
-                        : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
-                    }`}
-                  >
-                    {list}
-                  </button>
-                ))}
-              </div>
-
-              <div className="flex items-center gap-2 text-xs shrink-0">
-                <button
-                  type="button"
-                  onClick={() => setShowCompletedTasks(p => !p)}
-                  className="px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 font-medium"
-                >
-                  {showCompletedTasks ? 'Verberg afgerond' : 'Toon afgerond'}
-                </button>
-                {generalTasks.some(t => t.completed) && (
-                  <button
-                    type="button"
-                    onClick={onClearCompletedGeneralTasks}
-                    className="px-2.5 py-1.5 rounded-lg text-red-600 hover:bg-red-50 dark:hover:bg-red-950/40 font-medium"
-                  >
-                    Afgeronde wissen
-                  </button>
-                )}
-              </div>
-            </div>
-
-            {visibleGeneralTasks.length === 0 ? (
-              <div className="py-12 text-center text-slate-400 text-xs space-y-2">
-                <ListTodo className="w-8 h-8 mx-auto text-slate-300 dark:text-slate-700" />
-                <p>Geen algemene taken in deze lijst.</p>
-              </div>
-            ) : (
-              <div className="space-y-2.5">
-                {visibleGeneralTasks.map(task => {
-                  const assignedMember = familyMembers.find(m => m.id === task.assignedTo);
-                  return (
-                    <div
-                      key={task.id}
-                      onClick={() => onToggleGeneralTask(task.id)}
-                      className={`p-3.5 rounded-xl border cursor-pointer flex items-start justify-between gap-3 transition-all ${
-                        task.completed
-                          ? 'bg-emerald-50/50 dark:bg-emerald-950/20 border-emerald-200/70 dark:border-emerald-900/50 opacity-75'
-                          : 'bg-slate-50/70 dark:bg-slate-800/40 border-slate-200 dark:border-slate-700 hover:border-indigo-300'
-                      }`}
-                    >
-                      <div className="flex items-start gap-3 min-w-0">
-                        {task.completed ? (
-                          <CheckCircle2 className="w-5 h-5 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
-                        ) : (
-                          <Circle className="w-5 h-5 text-slate-400 shrink-0 mt-0.5" />
-                        )}
-                        <div className="min-w-0 space-y-1">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span
-                              className={`font-semibold text-sm ${
-                                task.completed
-                                  ? 'line-through text-slate-500'
-                                  : 'text-slate-900 dark:text-white'
-                              }`}
-                            >
-                              {task.title}
-                            </span>
-                            {task.priority === 'high' && !task.completed && (
-                              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-red-100 dark:bg-red-950 text-red-700 dark:text-red-300">
-                                Belangrijk
-                              </span>
-                            )}
-                            <span className="text-[10px] font-medium px-2 py-0.5 rounded bg-slate-200/80 dark:bg-slate-700 text-slate-700 dark:text-slate-200">
-                              {task.listName}
-                            </span>
-                          </div>
-                          {task.notes && (
-                            <p className="text-xs text-slate-500 dark:text-slate-400">
-                              {task.notes}
-                            </p>
-                          )}
-                          <div className="flex items-center gap-3 text-[11px] text-slate-500 flex-wrap">
-                            {task.dueDate && (
-                              <span className="font-mono">
-                                📅 {formatLocalDateNL(task.dueDate, { day: 'numeric', month: 'short' })}
-                              </span>
-                            )}
-                            {assignedMember && (
-                              <span className="inline-flex items-center gap-1">
-                                <MemberAvatar member={assignedMember} size="xs" />
-                                <span>{assignedMember.name}</span>
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-
-                      <button
-                        type="button"
-                        onClick={e => {
-                          e.stopPropagation();
-                          onDeleteGeneralTask(task.id);
-                        }}
-                        className="p-1.5 text-slate-300 hover:text-red-500 shrink-0"
-                        title="Verwijder algemene taak"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
 
       {/* Modal: Add Routine Chore */}
       {isAddChoreOpen && (

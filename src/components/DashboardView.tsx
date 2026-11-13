@@ -13,7 +13,10 @@ import {
   isChorePeriodActiveNow,
   getChorePeriodLabel,
   getChorePeriodTimeRange,
-  isChoreCompletedOnDate
+  isChoreCompletedOnDate,
+  eventOccursOnDate,
+  getEventStartDateStr,
+  formatLocalDateNL
 } from '../utils/dateTime';
 import {
   Calendar as CalendarIcon,
@@ -47,6 +50,7 @@ interface DashboardViewProps {
   onOpenNewEvent: () => void;
   onNavigateToCalendar: () => void;
   onNavigateToChores: () => void;
+  onNavigateToTasks: () => void;
   onNavigateToSettings: () => void;
   onToggleChore: (choreId: string, dateStr: string) => void;
   onToggleGeneralTask: (taskId: string) => void;
@@ -64,6 +68,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onOpenNewEvent,
   onNavigateToCalendar,
   onNavigateToChores,
+  onNavigateToTasks,
   onNavigateToSettings,
   onToggleChore,
   onToggleGeneralTask
@@ -101,19 +106,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
   const todayEvents = events
     .filter(evt => visibleCalendarIds.has(evt.calendarId))
-    .filter(evt => {
-      const startDay = evt.startTime.split('T')[0];
-      const endDay = evt.endTime.split('T')[0];
-      return startDay === localToday || (startDay <= localToday && endDay >= localToday);
-    })
-    .sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
+    .filter(evt => eventOccursOnDate(evt, localToday))
+    .sort((a, b) => {
+      if (Boolean(a.allDay) !== Boolean(b.allDay)) return a.allDay ? -1 : 1;
+      return new Date(a.startTime).getTime() - new Date(b.startTime).getTime();
+    });
 
   const upcomingEvents = events
     .filter(evt => visibleCalendarIds.has(evt.calendarId))
-    .filter(evt => {
-      const startDay = evt.startTime.split('T')[0];
-      return startDay > localToday;
-    })
+    .filter(evt => getEventStartDateStr(evt) > localToday)
     .sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime())
     .slice(0, 5);
 
@@ -367,11 +368,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 {upcomingEvents.map(evt => {
                   const calSource = calendarMap.get(evt.calendarId);
                   const calColor = calSource?.color || evt.calendarColor || '#6366F1';
-                  const eventDate = new Intl.DateTimeFormat('nl-NL', {
+                  const eventDate = formatLocalDateNL(getEventStartDateStr(evt), {
                     weekday: 'short',
                     day: 'numeric',
                     month: 'short'
-                  }).format(new Date(evt.startTime));
+                  });
 
                   return (
                     <div
@@ -389,6 +390,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                       </div>
                       <span className="text-slate-500 font-mono shrink-0 capitalize">
                         {eventDate}
+                        {evt.allDay ? ' · Hele dag' : ''}
                       </span>
                     </div>
                   );
@@ -545,10 +547,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               </span>
               <button
                 type="button"
-                onClick={onNavigateToChores}
+                onClick={onNavigateToTasks}
                 className="text-indigo-600 dark:text-indigo-400 font-semibold hover:underline"
               >
-                Beheren
+                Open takenlijsten
               </button>
             </div>
 

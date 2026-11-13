@@ -3,6 +3,7 @@ import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
 import { fileURLToPath } from 'url';
+import ical from 'node-ical';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -182,6 +183,7 @@ const DEFAULT_INITIAL_STATE = {
   choreCompletionsByDate: {} as Record<string, string[]>,
   starLogs: [] as any[],
   starLogsReconciled: true,
+  taskLists: ['Algemeen', 'Boodschappen', 'Herinneringen', "To-do's"],
   generalTasks: [
     {
       id: 'gt-1',
@@ -281,6 +283,19 @@ function getRawStoredData(): any {
       }
     }
 
+    const generalTasks = Array.isArray(parsed.generalTasks)
+      ? parsed.generalTasks
+      : DEFAULT_INITIAL_STATE.generalTasks;
+    const baseLists = Array.isArray(parsed.taskLists)
+      ? parsed.taskLists
+      : DEFAULT_INITIAL_STATE.taskLists;
+    const taskLists = Array.from(
+      new Set([
+        ...baseLists,
+        ...generalTasks.map((t: any) => t?.listName).filter(Boolean)
+      ])
+    );
+
     return {
       ...DEFAULT_INITIAL_STATE,
       ...parsed,
@@ -289,9 +304,8 @@ function getRawStoredData(): any {
       choreCompletionsByDate,
       starLogs,
       starLogsReconciled: true,
-      generalTasks: Array.isArray(parsed.generalTasks)
-        ? parsed.generalTasks
-        : DEFAULT_INITIAL_STATE.generalTasks,
+      taskLists,
+      generalTasks,
       settings: {
         ...DEFAULT_INITIAL_STATE.settings,
         ...(parsed.settings || {})
@@ -575,94 +589,104 @@ app.get('/api/weather/current', async (req: Request, res: Response) => {
   }
 });
 
-// Helper: Parse basic iCal / ICS feed into normalized events
+function extractICalText(field: any): string {
+  if (!field) return '';
+  if (typeof field === 'string') return field;
+  if (typeof field === 'object' && typeof field.val === 'string') return field.val;
+  return String(field);
+}
+
+function formatDateYYYYMMDD(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+// Parse iCal / ICS feed with full RRULE, TZID, EXDATE & RFC 5545 all-day support
 function parseICS(icsText: string, calendarId: string, calendarName: string, calendarColor: string) {
   const events: any[] = [];
-  const lines = icsText.replace(/\r\n /g, '').split(/\r\n|\n|\r/);
-  let inEvent = false;
-  let curEvent: any = {};
+  const parsed = ical.sync.parseICS(icsText);
 
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i].trim();
-    if (line === 'BEGIN:VEVENT') {
-      inEvent = true;
-      curEvent = {
-        id: 'ics-' + Math.random().toString(36).substring(2, 9),
+  // Rolling window: 180 days in the past (for "Toon verleden") up to 365 days in the future
+  const nowMs = Date.now();
+  const from = new Date(nowMs - 180 * 24 * 60 * 60 * 1000);
+  const to = new Date(nowMs + 365 * 24 * 60 * 60 * 1000);
+
+  let seq = 0;
+  for (const key of Object.keys(parsed)) {
+    const component = parsed[key];
+    if (!component || component.type !== 'VEVENT') continue;
+    if (component.status === 'CANCELLED') continue;
+
+    let instances: any[] = [];
+    try {
+      instances = ical.expandRecurringEvent(component, {
+        from,
+        to,
+        includeOverrides: true,
+        excludeExdates: true,
+        expandOngoing: true
+      });
+    } catch (err) {
+      console.warn('Could not expand iCal event, skipping:', component.uid, err);
+      continue;
+    }
+
+    for (const instance of instances) {
+      const ev = instance.event || component;
+      if (ev.status === 'CANCELLED') continue;
+
+      const title = extractICalText(instance.summary || ev.summary).trim();
+      if (!title || !instance.start) continue;
+
+      const isAllDay = Boolean(instance.isFullDay || ev.datetype === 'date');
+      let startTime: string;
+      let endTime: string;
+
+      if (isAllDay) {
+        const startDateStr = formatDateYYYYMMDD(instance.start);
+        let endDateStr = startDateStr;
+
+        if (instance.end && instance.end.getTime() > instance.start.getTime()) {
+          // RFC 5545 DTEND for DATE events is exclusive (day after), so subtract 1ms for inclusive end day
+          const inclusiveEnd = new Date(instance.end.getTime() - 1);
+          const candidateEndStr = formatDateYYYYMMDD(inclusiveEnd);
+          if (candidateEndStr >= startDateStr) {
+            endDateStr = candidateEndStr;
+          }
+        }
+
+        // Local ISO strings (without Z) prevent UTC offset shifting across 2 days
+        startTime = `${startDateStr}T00:00:00`;
+        endTime = `${endDateStr}T23:59:59`;
+      } else {
+        startTime = instance.start.toISOString();
+        endTime = (instance.end || instance.start).toISOString();
+      }
+
+      const rawUid = String(ev.uid || key || seq);
+      const safeUid = rawUid.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 32) || String(seq);
+      seq += 1;
+
+      events.push({
+        id: `ics-${safeUid}-${instance.start.getTime()}-${seq}`,
         calendarId,
         calendarName,
         calendarColor,
-        isExternal: true
-      };
-      continue;
-    }
-    if (line === 'END:VEVENT') {
-      inEvent = false;
-      if (curEvent.title && curEvent.startTime) {
-        if (!curEvent.endTime) {
-          curEvent.endTime = curEvent.startTime;
-        }
-        events.push(curEvent);
-      }
-      curEvent = {};
-      continue;
-    }
-    if (!inEvent) continue;
-
-    if (line.startsWith('SUMMARY:')) {
-      curEvent.title = line.substring(8).replace(/\\,/g, ',').replace(/\\;/g, ';');
-    } else if (line.startsWith('DESCRIPTION:')) {
-      curEvent.description = line.substring(12).replace(/\\n/g, '\n').replace(/\\,/g, ',');
-    } else if (line.startsWith('LOCATION:')) {
-      curEvent.location = line.substring(9).replace(/\\,/g, ',');
-    } else if (line.startsWith('UID:')) {
-      curEvent.id = 'ics-' + line.substring(4).replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 32);
-    } else if (line.startsWith('DTSTART')) {
-      const parts = line.split(':');
-      const val = parts[1];
-      if (val) {
-        if (val.length === 8) {
-          const y = val.substring(0, 4);
-          const m = val.substring(4, 6);
-          const d = val.substring(6, 8);
-          curEvent.startTime = `${y}-${m}-${d}T00:00:00.000Z`;
-          curEvent.allDay = true;
-        } else {
-          curEvent.startTime = formatICSDate(val);
-          curEvent.allDay = false;
-        }
-      }
-    } else if (line.startsWith('DTEND')) {
-      const parts = line.split(':');
-      const val = parts[1];
-      if (val) {
-        if (val.length === 8) {
-          const y = val.substring(0, 4);
-          const m = val.substring(4, 6);
-          const d = val.substring(6, 8);
-          curEvent.endTime = `${y}-${m}-${d}T23:59:59.000Z`;
-        } else {
-          curEvent.endTime = formatICSDate(val);
-        }
-      }
+        isExternal: true,
+        title,
+        description: extractICalText(ev.description) || undefined,
+        location: extractICalText(ev.location) || undefined,
+        startTime,
+        endTime,
+        allDay: isAllDay
+      });
     }
   }
 
+  events.sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
   return events;
-}
-
-function formatICSDate(val: string): string {
-  try {
-    const clean = val.replace(/[^0-9TZ]/g, '');
-    const y = clean.substring(0, 4);
-    const m = clean.substring(4, 6);
-    const d = clean.substring(6, 8);
-    const h = clean.substring(9, 11) || '00';
-    const min = clean.substring(11, 13) || '00';
-    const s = clean.substring(13, 15) || '00';
-    return new Date(Date.UTC(+y, +m - 1, +d, +h, +min, +s)).toISOString();
-  } catch {
-    return new Date().toISOString();
-  }
 }
 
 // Proxy endpoint to fetch iCal feed (bypasses browser CORS)

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { CalendarEvent, CalendarSource, FamilyMember } from '../types';
+import { getLocalDateStr } from '../utils/dateTime';
 import { X, Calendar, Clock, MapPin, User, Trash2, AlertCircle } from 'lucide-react';
 
 interface EventModalProps {
@@ -59,7 +60,7 @@ export const EventModal: React.FC<EventModalProps> = ({
       setLocation(editingEvent.location || '');
       setDescription(editingEvent.description || '');
     } else {
-      const defaultDate = initialDate || new Date().toISOString().split('T')[0];
+      const defaultDate = initialDate || getLocalDateStr();
       setTitle('');
       setCalendarId(calendars[0]?.id || 'cal-family');
       setStartDate(defaultDate);
@@ -90,8 +91,8 @@ export const EventModal: React.FC<EventModalProps> = ({
       let endIso: string;
 
       if (allDay) {
-        startIso = `${startDate}T00:00:00.000Z`;
-        endIso = `${endDate || startDate}T23:59:59.000Z`;
+        startIso = `${startDate}T00:00:00`;
+        endIso = `${endDate || startDate}T23:59:59`;
       } else {
         startIso = new Date(`${startDate}T${startTime}:00`).toISOString();
         endIso = new Date(`${endDate || startDate}T${endTime}:00`).toISOString();

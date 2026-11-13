@@ -4,6 +4,7 @@ import {
   LayoutDashboard,
   CalendarDays,
   Sparkles,
+  ListTodo,
   Settings
 } from 'lucide-react';
 
@@ -19,8 +20,9 @@ export const BottomNavBar: React.FC<BottomNavBarProps> = ({
   const tabs: { id: ViewTab; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'calendar', label: 'Kalender', icon: CalendarDays },
-    { id: 'chores', label: 'Taken', icon: Sparkles },
-    { id: 'settings', label: 'Instellingen', icon: Settings }
+    { id: 'chores', label: 'Sterren', icon: Sparkles },
+    { id: 'tasks', label: 'Lijsten', icon: ListTodo },
+    { id: 'settings', label: 'Opties', icon: Settings }
   ];
 
   return (
@@ -28,7 +30,7 @@ export const BottomNavBar: React.FC<BottomNavBarProps> = ({
       className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-t border-slate-200 dark:border-slate-800 transition-colors shadow-lg"
       aria-label="Mobiele navigatiebalk"
     >
-      <div className="grid grid-cols-4 items-center h-16 max-w-md mx-auto px-2">
+      <div className="grid grid-cols-5 items-center h-16 max-w-md mx-auto px-1">
         {tabs.map(tab => {
           const Icon = tab.icon;
           const isActive = currentTab === tab.id;

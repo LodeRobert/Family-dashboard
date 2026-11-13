@@ -88,3 +88,42 @@ export function isChoreCompletedOnDate(
   const list = completionsByDate[dateStr];
   return Array.isArray(list) && list.includes(choreId);
 }
+
+export function getEventStartDateStr(evt: { startTime: string; allDay?: boolean }): string {
+  if (evt.allDay) {
+    return evt.startTime.split('T')[0];
+  }
+  const d = new Date(evt.startTime);
+  return Number.isNaN(d.getTime()) ? evt.startTime.split('T')[0] : getLocalDateStr(d);
+}
+
+export function getEventEndDateStr(evt: {
+  startTime: string;
+  endTime: string;
+  allDay?: boolean;
+}): string {
+  if (evt.allDay) {
+    return (evt.endTime || evt.startTime).split('T')[0];
+  }
+  const start = new Date(evt.startTime);
+  const end = new Date(evt.endTime || evt.startTime);
+  if (Number.isNaN(end.getTime())) return getEventStartDateStr(evt);
+  if (
+    end.getTime() > start.getTime() &&
+    end.getHours() === 0 &&
+    end.getMinutes() === 0 &&
+    end.getSeconds() === 0
+  ) {
+    return getLocalDateStr(new Date(end.getTime() - 1));
+  }
+  return getLocalDateStr(end);
+}
+
+export function eventOccursOnDate(
+  evt: { startTime: string; endTime: string; allDay?: boolean },
+  dateStr: string
+): boolean {
+  const s = getEventStartDateStr(evt);
+  const e = getEventEndDateStr(evt);
+  return s === dateStr || (s <= dateStr && e >= dateStr);
+}

@@ -6,7 +6,14 @@ import {
   FamilyMember
 } from '../types';
 import { MemberAvatar } from './MemberAvatar';
-import { getLocalDateStr } from '../utils/dateTime';
+import {
+  getLocalDateStr,
+  eventOccursOnDate,
+  getEventStartDateStr,
+  getEventEndDateStr,
+  formatLocalDateNL,
+  shiftLocalDateStr
+} from '../utils/dateTime';
 import {
   ChevronLeft,
   ChevronRight,
@@ -15,9 +22,8 @@ import {
   Calendar as CalendarIcon,
   Clock,
   MapPin,
-  List,
-  Grid,
-  Columns
+  History,
+  Sun
 } from 'lucide-react';
 
 interface CalendarViewProps {
@@ -41,6 +47,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
 }) => {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [viewMode, setViewMode] = useState<CalendarViewMode>('month');
+  const [showPastInAgenda, setShowPastInAgenda] = useState(false);
 
   // Filter events by visible calendars and resolve live calendar metadata
   const calendarMap = new Map<string, CalendarSource>(calendars.map(c => [c.id, c]));
@@ -74,6 +81,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
 
   const handleToday = () => {
     setCurrentDate(new Date());
+    setShowPastInAgenda(false);
   };
 
   // Month Title
@@ -295,11 +303,12 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
           {/* Days Grid */}
           <div className="grid grid-cols-7 auto-rows-fr divide-x divide-y divide-slate-100 dark:divide-slate-800/80">
             {getMonthDays().map((dayObj, idx) => {
-              const dayEvents = activeEvents.filter(e => {
-                const s = e.startTime.split('T')[0];
-                const end = e.endTime.split('T')[0];
-                return s === dayObj.dateStr || (s <= dayObj.dateStr && end >= dayObj.dateStr);
-              });
+              const dayEvents = activeEvents
+                .filter(e => eventOccursOnDate(e, dayObj.dateStr))
+                .sort((a, b) => {
+                  if (Boolean(a.allDay) !== Boolean(b.allDay)) return a.allDay ? -1 : 1;
+                  return new Date(a.startTime).getTime() - new Date(b.startTime).getTime();
+                });
 
               const isToday = dayObj.dateStr === todayStr;
 
@@ -323,9 +332,9 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                     >
                       {dayObj.date.getDate()}
                     </span>
-                    {dayEvents.length > 2 && (
+                    {dayEvents.length > 3 && (
                       <span className="text-[10px] text-slate-400 font-mono hidden sm:inline">
-                        +{dayEvents.length - 2}
+                        +{dayEvents.length - 3}
                       </span>
                     )}
                   </div>
@@ -335,6 +344,13 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                     {dayEvents.slice(0, 3).map(evt => {
                       const liveColor =
                         calendarMap.get(evt.calendarId)?.color || evt.calendarColor || '#6366F1';
+                      const timePrefix = evt.allDay
+                        ? 'Hele dag · '
+                        : `${new Intl.DateTimeFormat('nl-NL', {
+                            hour: '2-digit',
+                            minute: '2-digit'
+                          }).format(new Date(evt.startTime))} `;
+
                       return (
                         <div
                           key={evt.id}
@@ -343,9 +359,18 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                             onSelectEvent(evt);
                           }}
                           style={{ borderLeftColor: liveColor }}
-                          className="px-1.5 py-0.5 rounded text-[11px] font-medium truncate border-l-2 bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors shadow-2xs"
-                          title={evt.title}
+                          className={`px-1.5 py-0.5 rounded text-[11px] font-medium truncate border-l-2 transition-colors shadow-2xs ${
+                            evt.allDay
+                              ? 'bg-indigo-50/90 dark:bg-indigo-950/50 text-indigo-900 dark:text-indigo-200 hover:bg-indigo-100'
+                              : 'bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700'
+                          }`}
+                          title={`${timePrefix}${evt.title}`}
                         >
+                          {evt.allDay && (
+                            <span className="text-[9px] font-bold uppercase tracking-tight text-indigo-600 dark:text-indigo-300 mr-1">
+                              [Hele dag]
+                            </span>
+                          )}
                           {evt.title}
                         </div>
                       );
@@ -383,11 +408,12 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
 
           <div className="grid grid-cols-7 divide-x divide-slate-100 dark:divide-slate-800/80 min-h-[380px]">
             {getWeekDays().map((d, i) => {
-              const dayEvents = activeEvents.filter(e => {
-                const s = e.startTime.split('T')[0];
-                const end = e.endTime.split('T')[0];
-                return s === d.dateStr || (s <= d.dateStr && end >= d.dateStr);
-              });
+              const dayEvents = activeEvents
+                .filter(e => eventOccursOnDate(e, d.dateStr))
+                .sort((a, b) => {
+                  if (Boolean(a.allDay) !== Boolean(b.allDay)) return a.allDay ? -1 : 1;
+                  return new Date(a.startTime).getTime() - new Date(b.startTime).getTime();
+                });
 
               return (
                 <div
@@ -414,10 +440,15 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                           onSelectEvent(evt);
                         }}
                         style={{ borderLeftColor: liveColor }}
-                        className="p-2 rounded-lg border-l-3 bg-slate-50 dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-700/80 text-xs hover:bg-white dark:hover:bg-slate-800 transition-all shadow-xs"
+                        className={`p-2 rounded-lg border-l-3 border text-xs transition-all shadow-xs ${
+                          evt.allDay
+                            ? 'bg-indigo-50/80 dark:bg-indigo-950/40 border-indigo-200/80 dark:border-indigo-900/60 hover:bg-indigo-100/70'
+                            : 'bg-slate-50 dark:bg-slate-800/80 border-slate-200/80 dark:border-slate-700/80 hover:bg-white dark:hover:bg-slate-800'
+                        }`}
                       >
-                        <div className="text-[10px] font-mono tabular-nums text-indigo-600 dark:text-indigo-400 font-semibold">
-                          {timeStr}
+                        <div className="text-[10px] font-mono tabular-nums text-indigo-600 dark:text-indigo-400 font-bold flex items-center gap-1">
+                          {evt.allDay && <Sun className="w-3 h-3 text-amber-500 shrink-0" />}
+                          <span>{timeStr}</span>
                         </div>
                         <div className="font-semibold text-slate-900 dark:text-white line-clamp-2">
                           {evt.title}
@@ -442,7 +473,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
         <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs p-6 space-y-4">
           <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
             <div>
-              <h3 className="text-lg font-bold text-slate-900 dark:text-white">
+              <h3 className="text-lg font-bold text-slate-900 dark:text-white capitalize">
                 {new Intl.DateTimeFormat('nl-NL', {
                   weekday: 'long',
                   day: 'numeric',
@@ -465,12 +496,11 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
           {(() => {
             const dateStr = getLocalDateStr(currentDate);
             const dayEvents = activeEvents
-              .filter(e => {
-                const s = e.startTime.split('T')[0];
-                const end = e.endTime.split('T')[0];
-                return s === dateStr || (s <= dateStr && end >= dateStr);
-              })
-              .sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
+              .filter(e => eventOccursOnDate(e, dateStr))
+              .sort((a, b) => {
+                if (Boolean(a.allDay) !== Boolean(b.allDay)) return a.allDay ? -1 : 1;
+                return new Date(a.startTime).getTime() - new Date(b.startTime).getTime();
+              });
 
             if (dayEvents.length === 0) {
               return (
@@ -556,67 +586,187 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
         </div>
       )}
 
-      {/* VIEW: AGENDA / LIST */}
-      {viewMode === 'agenda' && (
-        <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs divide-y divide-slate-100 dark:divide-slate-800/80 overflow-hidden">
-          {activeEvents.length === 0 ? (
-            <div className="p-8 text-center text-slate-500">
-              Geen actieve afspraken gevonden.
+      {/* VIEW: AGENDA / LIST (defaults to today + upcoming, with Past toggle) */}
+      {viewMode === 'agenda' && (() => {
+        const sortedAll = [...activeEvents].sort(
+          (a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime()
+        );
+        const upcomingOrToday = sortedAll.filter(evt => getEventEndDateStr(evt) >= todayStr);
+        const pastEvents = sortedAll.filter(evt => getEventEndDateStr(evt) < todayStr);
+        const displayedEvents = showPastInAgenda ? sortedAll : upcomingOrToday;
+        const tomorrowStr = shiftLocalDateStr(todayStr, 1);
+
+        return (
+          <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs overflow-hidden">
+            {/* Agenda Scope Header & Past Toggle */}
+            <div className="px-4 sm:px-5 py-3 bg-slate-50/80 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+              <div className="flex items-center gap-2 text-slate-700 dark:text-slate-300 font-semibold">
+                <CalendarIcon className="w-4 h-4 text-indigo-500" />
+                <span>
+                  {showPastInAgenda
+                    ? `Alle afspraken inclusief verleden (${displayedEvents.length})`
+                    : `Vanaf vandaag & komende dagen (${upcomingOrToday.length})`}
+                </span>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setShowPastInAgenda(p => !p)}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border font-semibold transition-colors self-start sm:self-auto ${
+                  showPastInAgenda
+                    ? 'bg-indigo-600 text-white border-indigo-600'
+                    : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800'
+                }`}
+              >
+                <History className="w-3.5 h-3.5" />
+                <span>
+                  {showPastInAgenda
+                    ? 'Alleen vanaf vandaag tonen'
+                    : `Verleden tonen (${pastEvents.length})`}
+                </span>
+              </button>
             </div>
-          ) : (
-            activeEvents
-              .sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime())
-              .map(evt => {
-                const dateHeader = new Intl.DateTimeFormat('nl-NL', {
-                  weekday: 'long',
-                  day: 'numeric',
-                  month: 'long'
-                }).format(new Date(evt.startTime));
 
-                const timeFormatted = evt.allDay
-                  ? 'Hele dag'
-                  : new Intl.DateTimeFormat('nl-NL', {
-                      hour: '2-digit',
-                      minute: '2-digit'
-                    }).format(new Date(evt.startTime));
-
-                const calSource = calendarMap.get(evt.calendarId);
-                const liveColor = calSource?.color || evt.calendarColor || '#6366F1';
-                const liveCalName = calSource?.name || evt.calendarName || 'Agenda';
-
-                return (
-                  <div
-                    key={evt.id}
-                    onClick={() => onSelectEvent(evt)}
-                    className="p-4 hover:bg-slate-50 dark:hover:bg-slate-800/50 cursor-pointer flex items-center justify-between gap-4 transition-colors"
+            {displayedEvents.length === 0 ? (
+              <div className="p-10 text-center text-slate-500 space-y-2 text-xs">
+                <CalendarIcon className="w-8 h-8 mx-auto text-slate-300 dark:text-slate-600" />
+                <p className="text-sm font-semibold text-slate-700 dark:text-slate-300">
+                  Geen geplande afspraken vanaf vandaag.
+                </p>
+                {pastEvents.length > 0 && !showPastInAgenda && (
+                  <button
+                    type="button"
+                    onClick={() => setShowPastInAgenda(true)}
+                    className="text-indigo-600 dark:text-indigo-400 font-semibold hover:underline"
                   >
-                    <div className="flex items-center gap-3">
-                      <div
-                        className="w-2.5 h-2.5 rounded-full shrink-0"
-                        style={{ backgroundColor: liveColor }}
-                      />
-                      <div>
-                        <div className="font-semibold text-slate-900 dark:text-white text-sm">
-                          {evt.title}
-                        </div>
-                        <div className="text-xs text-slate-500 capitalize">
-                          {dateHeader} · {timeFormatted}
-                          {evt.location && ` · 📍 ${evt.location}`}
+                    Bekijk {pastEvents.length} eerdere afspraken in het verleden
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="divide-y divide-slate-100 dark:divide-slate-800/80">
+                {displayedEvents.map(evt => {
+                  const startDateStr = getEventStartDateStr(evt);
+                  const endDateStr = getEventEndDateStr(evt);
+                  const isPast = endDateStr < todayStr;
+                  const isOngoingToday = startDateStr <= todayStr && endDateStr >= todayStr;
+                  const isTomorrow = startDateStr === tomorrowStr;
+
+                  const formattedStartDate = formatLocalDateNL(startDateStr, {
+                    weekday: 'long',
+                    day: 'numeric',
+                    month: 'long',
+                    year: 'numeric'
+                  });
+
+                  const isMultiDay = endDateStr > startDateStr;
+                  const formattedEndShort = isMultiDay
+                    ? formatLocalDateNL(endDateStr, {
+                        day: 'numeric',
+                        month: 'short',
+                        year: 'numeric'
+                      })
+                    : '';
+
+                  const timeFormatted = evt.allDay
+                    ? isMultiDay
+                      ? `Hele dag (t/m ${formattedEndShort})`
+                      : 'Hele dag'
+                    : `${new Intl.DateTimeFormat('nl-NL', {
+                        hour: '2-digit',
+                        minute: '2-digit'
+                      }).format(new Date(evt.startTime))} – ${new Intl.DateTimeFormat('nl-NL', {
+                        hour: '2-digit',
+                        minute: '2-digit'
+                      }).format(new Date(evt.endTime))}`;
+
+                  const calSource = calendarMap.get(evt.calendarId);
+                  const liveColor = calSource?.color || evt.calendarColor || '#6366F1';
+                  const liveCalName = calSource?.name || evt.calendarName || 'Agenda';
+                  const assignedMember = familyMembers.find(m => m.id === evt.assignedTo);
+
+                  return (
+                    <div
+                      key={evt.id}
+                      onClick={() => onSelectEvent(evt)}
+                      className={`p-4 hover:bg-slate-50 dark:hover:bg-slate-800/50 cursor-pointer flex flex-col sm:flex-row sm:items-center justify-between gap-3 transition-colors ${
+                        isPast ? 'opacity-65' : ''
+                      }`}
+                    >
+                      <div className="flex items-start gap-3 min-w-0">
+                        <div
+                          className="w-3 h-3 rounded-full mt-1.5 shrink-0"
+                          style={{ backgroundColor: liveColor }}
+                        />
+                        <div className="min-w-0 space-y-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-bold text-slate-900 dark:text-white text-sm">
+                              {evt.title}
+                            </span>
+
+                            {evt.allDay && (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-indigo-50 dark:bg-indigo-950/70 text-indigo-700 dark:text-indigo-300 border border-indigo-200/70 dark:border-indigo-800">
+                                <Sun className="w-3 h-3 text-amber-500" />
+                                Hele dag
+                              </span>
+                            )}
+
+                            {isOngoingToday && (
+                              <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-50 dark:bg-emerald-950/70 text-emerald-700 dark:text-emerald-300">
+                                Vandaag
+                              </span>
+                            )}
+
+                            {!isOngoingToday && isTomorrow && (
+                              <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-50 dark:bg-amber-950/70 text-amber-700 dark:text-amber-300">
+                                Morgen
+                              </span>
+                            )}
+
+                            {assignedMember && (
+                              <span
+                                className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full font-medium text-white"
+                                style={{ backgroundColor: assignedMember.color }}
+                              >
+                                <MemberAvatar
+                                  member={assignedMember}
+                                  size="xs"
+                                  className="border-white/80"
+                                />
+                                <span>{assignedMember.name}</span>
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="text-xs text-slate-600 dark:text-slate-400 flex items-center gap-2 flex-wrap">
+                            <span className="capitalize font-medium">{formattedStartDate}</span>
+                            <span>·</span>
+                            <span className="font-mono font-semibold text-indigo-600 dark:text-indigo-400">
+                              {timeFormatted}
+                            </span>
+                            {evt.location && (
+                              <>
+                                <span>·</span>
+                                <span>📍 {evt.location}</span>
+                              </>
+                            )}
+                          </div>
                         </div>
                       </div>
-                    </div>
 
-                    <div className="text-right shrink-0">
-                      <span className="text-xs text-slate-400 font-mono">
-                        {liveCalName}
-                      </span>
+                      <div className="text-left sm:text-right shrink-0 pl-6 sm:pl-0">
+                        <span className="text-xs text-slate-500 dark:text-slate-400 font-medium">
+                          {liveCalName}
+                        </span>
+                      </div>
                     </div>
-                  </div>
-                );
-              })
-          )}
-        </div>
-      )}
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        );
+      })()}
     </div>
   );
 };
