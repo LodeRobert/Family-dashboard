@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { FamilyMember } from '../types';
+import { resolveAssetUrl } from '../utils/api';
 
 interface MemberAvatarProps {
   member: Pick<FamilyMember, 'name' | 'avatar' | 'photoUrl' | 'color'>;
@@ -22,7 +23,8 @@ export const MemberAvatar: React.FC<MemberAvatarProps> = ({
 }) => {
   const [imgFailed, setImgFailed] = useState(false);
 
-  const showPhoto = Boolean(member.photoUrl) && !imgFailed;
+  const resolvedPhotoUrl = resolveAssetUrl(member.photoUrl);
+  const showPhoto = Boolean(resolvedPhotoUrl) && !imgFailed;
 
   return (
     <div
@@ -32,7 +34,7 @@ export const MemberAvatar: React.FC<MemberAvatarProps> = ({
     >
       {showPhoto ? (
         <img
-          src={member.photoUrl}
+          src={resolvedPhotoUrl}
           alt={member.name}
           referrerPolicy="no-referrer"
           onError={() => setImgFailed(true)}

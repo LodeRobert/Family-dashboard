@@ -1,4 +1,4 @@
-export type CalendarType = 'local' | 'ical';
+export type CalendarType = 'local' | 'ical' | 'homeassistant';
 export type CalendarAssignmentMode = 'family' | 'members';
 export type CalendarMultiDayMode = 'smart_cutoff' | 'start_day_only' | 'all_days';
 
@@ -10,6 +10,7 @@ export interface CalendarSource {
   visible: boolean;
   description?: string;
   url?: string; // For iCal feeds
+  haEntityId?: string; // For Home Assistant calendar.* entities
   isReadOnly?: boolean;
   assignmentMode?: CalendarAssignmentMode; // 'family' = volledige gezin, 'members' = 1 of meer gezinsleden
   memberIds?: string[]; // Gekoppelde gezinsleden (bijv. 1 ouder, of 2 kinderen samen)
@@ -29,6 +30,8 @@ export interface CalendarEvent {
   calendarName?: string;
   calendarColor?: string;
   isExternal?: boolean;
+  isDailyRule?: boolean;
+  dailyRuleId?: string;
   multiDayOverride?: 'default' | 'all_days' | 'start_day_only';
 }
 
@@ -82,6 +85,66 @@ export interface GeneralTask {
   priority: 'low' | 'normal' | 'high';
 }
 
+export interface LinkedHaTodoList {
+  entityId: string;
+  name: string;
+}
+
+export interface HaTodoItem {
+  uid: string;
+  summary: string;
+  status: 'needs_action' | 'completed';
+  due?: string;
+  description?: string;
+}
+
+export interface DailyAutomationRule {
+  id: string;
+  title: string;
+  time: string; // HH:mm
+  durationMinutes: number;
+  daysOfWeek: number[]; // 0 = zo, 1 = ma, ... 6 = za
+  enabled: boolean;
+  showOnCalendar: boolean;
+  calendarId?: string;
+  skipCalendarIds: string[];
+  skipKeywords?: string;
+  haTargetEntityId?: string; // automation.*, script.*, scene.*, switch.*, light.*, input_boolean.*
+  haWebhookId?: string;
+  lastTriggeredDate?: string;
+  lastTriggeredAt?: string;
+  lastSkippedDate?: string;
+  lastSkippedReason?: string;
+}
+
+export interface HaStatusInfo {
+  connected: boolean;
+  mode: 'supervisor' | 'manual' | 'none';
+  addonMode: boolean;
+  haUrl: string;
+  hasToken: boolean;
+  locationName?: string;
+  version?: string;
+  error?: string;
+}
+
+export interface HaCalendarEntity {
+  entityId: string;
+  name: string;
+}
+
+export interface HaTodoEntity {
+  entityId: string;
+  name: string;
+  count?: string;
+}
+
+export interface HaActionEntity {
+  entityId: string;
+  name: string;
+  domain: string;
+}
+
 export interface RewardItem {
   id: string;
   title: string;
@@ -100,6 +163,9 @@ export interface AppSettings {
   weatherCondition: string;
   weatherCode?: number;
   hasSettingsPassword?: boolean;
+  haUrl?: string;
+  hasHaToken?: boolean;
+  haAddonMode?: boolean;
   kioskAutoDim: boolean;
   kioskDimAfterMinutes: number;
   kioskTheme: 'auto' | 'light' | 'dark';
@@ -116,6 +182,8 @@ export interface AppState {
   starLogsReconciled?: boolean;
   taskLists?: string[];
   generalTasks: GeneralTask[];
+  haLinkedTodoEntities?: LinkedHaTodoList[];
+  dailyAutomationRules?: DailyAutomationRule[];
   rewards: RewardItem[];
   settings: AppSettings;
 }

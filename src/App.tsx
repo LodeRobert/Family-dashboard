@@ -5,8 +5,10 @@ import {
   CalendarEvent,
   CalendarSource,
   Chore,
+  DailyAutomationRule,
   FamilyMember,
   GeneralTask,
+  LinkedHaTodoList,
   RewardItem,
   StarLogEntry,
   ViewTab
@@ -29,9 +31,11 @@ import {
   loadAppState,
   saveAppState,
   fetchICalFeedEvents,
+  fetchHaCalendarEvents,
   fetchCurrentWeather
 } from './services/storage';
 import { getLocalDateStr } from './utils/dateTime';
+import { expandDailyRulesToCalendarEvents } from './utils/dailyRules';
 
 export default function App() {
   const [currentTab, setCurrentTab] = useState<ViewTab>('dashboard');
@@ -110,7 +114,7 @@ export default function App() {
     });
   };
 
-  // Sync iCal feeds via server proxy
+  // Sync iCal & Home Assistant calendars via server proxy
   const refreshExternalCalendars = useCallback(async (calendars: CalendarSource[]) => {
     const allExtEvents: CalendarEvent[] = [];
 
@@ -121,6 +125,13 @@ export default function App() {
           allExtEvents.push(...icalEvts);
         } catch (err) {
           console.error(`Error loading iCal feed for ${cal.name}:`, err);
+        }
+      } else if (cal.type === 'homeassistant' && cal.haEntityId) {
+        try {
+          const haEvts = await fetchHaCalendarEvents(cal);
+          allExtEvents.push(...haEvts);
+        } catch (err) {
+          console.error(`Error loading Home Assistant calendar for ${cal.name}:`, err);
         }
       }
     }
@@ -721,6 +732,55 @@ export default function App() {
     }));
   };
 
+  // Linked Home Assistant To-Do Lists Handlers
+  const handleLinkHaTodoList = async (entity: LinkedHaTodoList) => {
+    await updateStateAndPersist(prev => {
+      const existing = prev.haLinkedTodoEntities || [];
+      if (existing.some(e => e.entityId === entity.entityId)) return prev;
+      return {
+        ...prev,
+        haLinkedTodoEntities: [...existing, entity]
+      };
+    });
+  };
+
+  const handleUnlinkHaTodoList = async (entityId: string) => {
+    await updateStateAndPersist(prev => ({
+      ...prev,
+      haLinkedTodoEntities: (prev.haLinkedTodoEntities || []).filter(
+        e => e.entityId !== entityId
+      )
+    }));
+  };
+
+  // Daily Automation Rules Handlers
+  const handleAddDailyRule = async (ruleData: Omit<DailyAutomationRule, 'id'>) => {
+    const newRule: DailyAutomationRule = {
+      ...ruleData,
+      id: 'rule-' + Math.random().toString(36).substring(2, 9)
+    };
+    await updateStateAndPersist(prev => ({
+      ...prev,
+      dailyAutomationRules: [...(prev.dailyAutomationRules || []), newRule]
+    }));
+  };
+
+  const handleUpdateDailyRule = async (ruleId: string, patch: Partial<DailyAutomationRule>) => {
+    await updateStateAndPersist(prev => ({
+      ...prev,
+      dailyAutomationRules: (prev.dailyAutomationRules || []).map(r =>
+        r.id === ruleId ? { ...r, ...patch } : r
+      )
+    }));
+  };
+
+  const handleDeleteDailyRule = async (ruleId: string) => {
+    await updateStateAndPersist(prev => ({
+      ...prev,
+      dailyAutomationRules: (prev.dailyAutomationRules || []).filter(r => r.id !== ruleId)
+    }));
+  };
+
   const handleSyncAll = async () => {
     if (appState) {
       await refreshExternalCalendars(appState.calendars);
@@ -738,7 +798,14 @@ export default function App() {
     );
   }
 
-  const combinedEvents = [...appState.events, ...externalEvents];
+  const baseEvents = [...appState.events, ...externalEvents];
+  const dailyRuleEvents = expandDailyRulesToCalendarEvents(
+    appState.dailyAutomationRules,
+    appState.calendars,
+    baseEvents,
+    todayStr
+  );
+  const combinedEvents = [...baseEvents, ...dailyRuleEvents];
 
   return (
     <div
@@ -884,9 +951,12 @@ export default function App() {
           <GeneralTasksView
             taskLists={appState.taskLists || ['Algemeen', 'Boodschappen', 'Herinneringen', "To-do's"]}
             generalTasks={appState.generalTasks}
+            haLinkedTodoEntities={appState.haLinkedTodoEntities || []}
             familyMembers={appState.familyMembers}
             onAddTaskList={handleAddTaskList}
             onDeleteTaskList={handleDeleteTaskList}
+            onLinkHaTodoList={handleLinkHaTodoList}
+            onUnlinkHaTodoList={handleUnlinkHaTodoList}
             onAddGeneralTask={handleAddGeneralTask}
             onUpdateGeneralTask={handleUpdateGeneralTask}
             onToggleGeneralTask={handleToggleGeneralTask}
@@ -901,6 +971,7 @@ export default function App() {
           ) : (
             <SettingsView
               appState={appState}
+              allEvents={baseEvents}
               onUpdateSettings={handleUpdateSettings}
               onUpdateFamilyMembers={handleUpdateFamilyMembers}
               onAddFamilyMember={handleAddFamilyMember}
@@ -913,6 +984,10 @@ export default function App() {
               onDeleteChore={handleDeleteChore}
               onUpdateCalendars={handleUpdateCalendars}
               onOpenManageCalendars={() => setIsManageCalendarsOpen(true)}
+              onAddDailyRule={handleAddDailyRule}
+              onUpdateDailyRule={handleUpdateDailyRule}
+              onDeleteDailyRule={handleDeleteDailyRule}
+              onHaStatusChanged={() => refreshExternalCalendars(appState.calendars)}
               onLockSettings={() => setIsSettingsUnlocked(false)}
               onRestoreState={async newState => {
                 setAppState(newState);

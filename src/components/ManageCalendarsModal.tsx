@@ -1,14 +1,22 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   CalendarAssignmentMode,
   CalendarMultiDayMode,
   CalendarSource,
-  FamilyMember
+  FamilyMember,
+  HaCalendarEntity,
+  HaStatusInfo
 } from '../types';
 import { ColorPickerField } from './ColorPickerField';
 import { CalendarAssignmentControls } from './CalendarAssignmentControls';
 import { CalendarAssigneeBadge } from './CalendarAssigneeBadge';
 import { getCalendarAssignees } from '../utils/calendarHelpers';
+import { apiUrl } from '../utils/api';
+import {
+  fetchHaCalendars,
+  fetchHaStatus,
+  fetchHaCalendarEvents
+} from '../services/storage';
 import {
   X,
   Trash2,
@@ -19,7 +27,8 @@ import {
   Sparkles,
   Info,
   Link,
-  Plus
+  Plus,
+  Home
 } from 'lucide-react';
 
 interface ManageCalendarsModalProps {
@@ -45,7 +54,7 @@ export const ManageCalendarsModal: React.FC<ManageCalendarsModalProps> = ({
   onToggleVisibility,
   onSyncAll
 }) => {
-  const [activeTab, setActiveTab] = useState<'ical' | 'local' | 'all'>('ical');
+  const [activeTab, setActiveTab] = useState<'ical' | 'ha' | 'local' | 'all'>('ical');
   const [icalUrl, setIcalUrl] = useState('');
   const [icalName, setIcalName] = useState('Mijn iCal Agenda');
   const [icalColor, setIcalColor] = useState('#4285F4');
@@ -55,6 +64,20 @@ export const ManageCalendarsModal: React.FC<ManageCalendarsModalProps> = ({
   const [isTestingIcal, setIsTestingIcal] = useState(false);
   const [icalError, setIcalError] = useState('');
   const [icalSuccess, setIcalSuccess] = useState('');
+
+  // Home Assistant calendar connector
+  const [haStatus, setHaStatus] = useState<HaStatusInfo | null>(null);
+  const [haCalendars, setHaCalendars] = useState<HaCalendarEntity[]>([]);
+  const [isLoadingHa, setIsLoadingHa] = useState(false);
+  const [haSelectedEntityId, setHaSelectedEntityId] = useState('');
+  const [haCalName, setHaCalName] = useState('');
+  const [haCalColor, setHaCalColor] = useState('#0EA5E9');
+  const [haAssignmentMode, setHaAssignmentMode] = useState<CalendarAssignmentMode>('family');
+  const [haMemberIds, setHaMemberIds] = useState<string[]>([]);
+  const [haMultiDayMode, setHaMultiDayMode] = useState<CalendarMultiDayMode>('smart_cutoff');
+  const [isAddingHaCal, setIsAddingHaCal] = useState(false);
+  const [haError, setHaError] = useState('');
+  const [haSuccess, setHaSuccess] = useState('');
 
   // Local calendar form
   const [localName, setLocalName] = useState('');
@@ -66,6 +89,35 @@ export const ManageCalendarsModal: React.FC<ManageCalendarsModalProps> = ({
   const [localSuccess, setLocalSuccess] = useState('');
 
   const [isSyncing, setIsSyncing] = useState(false);
+
+  const loadHaInfo = useCallback(async () => {
+    try {
+      setIsLoadingHa(true);
+      setHaError('');
+      const st = await fetchHaStatus();
+      setHaStatus(st);
+      if (st.connected) {
+        const list = await fetchHaCalendars();
+        setHaCalendars(list);
+        if (list.length > 0 && !haSelectedEntityId) {
+          setHaSelectedEntityId(list[0].entityId);
+          setHaCalName(list[0].name);
+        }
+      } else {
+        setHaCalendars([]);
+      }
+    } catch (err: any) {
+      setHaError(err.message || 'Kon Home Assistant niet bereiken.');
+    } finally {
+      setIsLoadingHa(false);
+    }
+  }, [haSelectedEntityId]);
+
+  useEffect(() => {
+    if (isOpen && activeTab === 'ha') {
+      loadHaInfo();
+    }
+  }, [isOpen, activeTab, loadHaInfo]);
 
   if (!isOpen) return null;
 
@@ -83,7 +135,9 @@ export const ManageCalendarsModal: React.FC<ManageCalendarsModalProps> = ({
 
       const cleanUrl = icalUrl.trim();
       const testRes = await fetch(
-        `/api/ical/fetch?url=${encodeURIComponent(cleanUrl)}&calendarName=${encodeURIComponent(icalName.trim())}&calendarColor=${encodeURIComponent(icalColor)}`
+        apiUrl(
+          `/api/ical/fetch?url=${encodeURIComponent(cleanUrl)}&calendarName=${encodeURIComponent(icalName.trim())}&calendarColor=${encodeURIComponent(icalColor)}`
+        )
       );
 
       if (!testRes.ok) {
@@ -118,6 +172,51 @@ export const ManageCalendarsModal: React.FC<ManageCalendarsModalProps> = ({
       setIcalError(err.message || 'Fout bij het ophalen van de agenda.');
     } finally {
       setIsTestingIcal(false);
+    }
+  };
+
+  const handleAddHaCalendar = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!haSelectedEntityId) {
+      setHaError('Selecteer een Home Assistant kalender.');
+      return;
+    }
+
+    try {
+      setIsAddingHaCal(true);
+      setHaError('');
+      setHaSuccess('');
+
+      const selectedMeta = haCalendars.find(c => c.entityId === haSelectedEntityId);
+      const displayName = haCalName.trim() || selectedMeta?.name || haSelectedEntityId;
+      const newCalId = 'ha-' + Math.random().toString(36).substring(2, 9);
+
+      const tempCal: CalendarSource = {
+        id: newCalId,
+        name: displayName,
+        color: haCalColor,
+        type: 'homeassistant',
+        haEntityId: haSelectedEntityId,
+        visible: true,
+        isReadOnly: true,
+        description: `Home Assistant (${haSelectedEntityId})`,
+        assignmentMode: haAssignmentMode,
+        memberIds: haAssignmentMode === 'members' ? haMemberIds : [],
+        multiDayMode: haMultiDayMode
+      };
+
+      const fetched = await fetchHaCalendarEvents(tempCal);
+      onAddCalendar(tempCal);
+      setHaSuccess(
+        `Home Assistant agenda "${displayName}" gekoppeld! (${fetched.length} afspraken geladen)`
+      );
+      setHaAssignmentMode('family');
+      setHaMemberIds([]);
+      setHaMultiDayMode('smart_cutoff');
+    } catch (err: any) {
+      setHaError(err.message || 'Kon Home Assistant kalender niet koppelen.');
+    } finally {
+      setIsAddingHaCal(false);
     }
   };
 
@@ -174,10 +273,10 @@ export const ManageCalendarsModal: React.FC<ManageCalendarsModalProps> = ({
             </div>
             <div>
               <h3 className="text-base font-bold text-slate-900 dark:text-white leading-tight">
-                Agenda's & iCal Koppelingen
+                Agenda's, iCal & Home Assistant
               </h3>
               <p className="text-[11px] text-slate-500">
-                Koppel agenda's via iCal (Google, Apple, Outlook) of maak lokale gezinsagenda's aan
+                Koppel iCal-feeds, Home Assistant kalenders of maak lokale gezinsagenda's aan
               </p>
             </div>
           </div>
@@ -200,7 +299,7 @@ export const ManageCalendarsModal: React.FC<ManageCalendarsModalProps> = ({
             className="inline-flex items-center gap-1.5 px-3 py-1 font-semibold text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
-            <span>iCal Nu Verversen</span>
+            <span>Nu Verversen</span>
           </button>
         </div>
 
@@ -215,7 +314,19 @@ export const ManageCalendarsModal: React.FC<ManageCalendarsModalProps> = ({
             }`}
           >
             <Link className="w-3.5 h-3.5" />
-            <span>iCal Feed Koppelen</span>
+            <span>iCal Feed</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('ha')}
+            className={`px-3 py-2 rounded-lg transition-colors whitespace-nowrap flex items-center gap-1.5 ${
+              activeTab === 'ha'
+                ? 'bg-sky-600 text-white shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+            }`}
+          >
+            <Home className="w-3.5 h-3.5" />
+            <span>Home Assistant</span>
           </button>
 
           <button
@@ -227,7 +338,7 @@ export const ManageCalendarsModal: React.FC<ManageCalendarsModalProps> = ({
             }`}
           >
             <Plus className="w-3.5 h-3.5" />
-            <span>Lokale Agenda Maken</span>
+            <span>Lokale Agenda</span>
           </button>
 
           <button
@@ -238,7 +349,7 @@ export const ManageCalendarsModal: React.FC<ManageCalendarsModalProps> = ({
                 : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
             }`}
           >
-            <span>Kleuren & Overzicht ({calendars.length})</span>
+            <span>Overzicht ({calendars.length})</span>
           </button>
         </div>
 
@@ -354,7 +465,141 @@ export const ManageCalendarsModal: React.FC<ManageCalendarsModalProps> = ({
             </div>
           )}
 
-          {/* TAB 2: LOCAL CALENDAR */}
+          {/* TAB 2: HOME ASSISTANT CALENDARS */}
+          {activeTab === 'ha' && (
+            <div className="space-y-4">
+              <div className="p-3.5 rounded-xl bg-sky-50/80 dark:bg-sky-950/40 border border-sky-200 dark:border-sky-800/60 flex items-start justify-between gap-3">
+                <div className="flex items-start gap-3">
+                  <Home className="w-5 h-5 text-sky-600 dark:text-sky-400 shrink-0 mt-0.5" />
+                  <div className="space-y-1">
+                    <div className="font-bold text-slate-900 dark:text-white text-xs">
+                      Kalenders uit Home Assistant importeren
+                    </div>
+                    <p className="text-slate-600 dark:text-slate-300 text-[11px] leading-relaxed">
+                      Gebruik elke Home Assistant kalender (zoals Lokale Kalender, CalDAV, Schoolvakanties of Google integratie in HA) direct op je HomeBoard.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={loadHaInfo}
+                  disabled={isLoadingHa}
+                  className="px-2.5 py-1.5 rounded-lg border border-sky-200 dark:border-sky-800 bg-white dark:bg-slate-900 text-[11px] font-semibold text-sky-700 dark:text-sky-300 hover:bg-sky-50 shrink-0 inline-flex items-center gap-1"
+                >
+                  <RefreshCw className={`w-3 h-3 ${isLoadingHa ? 'animate-spin' : ''}`} />
+                  <span>Ververs</span>
+                </button>
+              </div>
+
+              {haSuccess && (
+                <div className="p-3 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/60 rounded-xl text-emerald-800 dark:text-emerald-200 flex items-center gap-2">
+                  <Check className="w-4 h-4 shrink-0 text-emerald-600" />
+                  <span>{haSuccess}</span>
+                </div>
+              )}
+
+              {haError && (
+                <div className="p-3 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/60 rounded-xl text-red-700 dark:text-red-300 flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  <span>{haError}</span>
+                </div>
+              )}
+
+              {isLoadingHa ? (
+                <div className="py-10 text-center text-slate-400 text-xs">
+                  Home Assistant kalenders ophalen...
+                </div>
+              ) : !haStatus?.connected ? (
+                <div className="p-4 rounded-xl border border-amber-200 dark:border-amber-900/60 bg-amber-50/70 dark:bg-amber-950/30 space-y-2 text-xs text-amber-900 dark:text-amber-200">
+                  <div className="font-bold">Home Assistant is nog niet gekoppeld</div>
+                  <p className="text-[11px] leading-relaxed">
+                    Draait HomeBoard als Home Assistant Add-on? Dan werkt de koppeling automatisch zodra je de add-on in Home Assistant start. Draai je los in Docker? Vul dan eenmalig je Home Assistant URL en Long-Lived Access Token in bij <strong>Instellingen → Home Assistant Koppeling</strong>.
+                  </p>
+                </div>
+              ) : haCalendars.length === 0 ? (
+                <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/40 text-center text-slate-500">
+                  Geen kalenders (`calendar.*`) gevonden in Home Assistant. Voeg eerst een kalender-integratie toe in Home Assistant (bijv. <em>Local Calendar</em>).
+                </div>
+              ) : (
+                <form
+                  onSubmit={handleAddHaCalendar}
+                  className="space-y-4 p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900"
+                >
+                  <div>
+                    <label className="block font-semibold mb-1 text-slate-700 dark:text-slate-300">
+                      Kies Home Assistant kalender *
+                    </label>
+                    <select
+                      value={haSelectedEntityId}
+                      onChange={e => {
+                        const nextId = e.target.value;
+                        setHaSelectedEntityId(nextId);
+                        const found = haCalendars.find(c => c.entityId === nextId);
+                        if (found) setHaCalName(found.name);
+                      }}
+                      className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
+                      required
+                    >
+                      {haCalendars.map(hc => {
+                        const alreadyLinked = calendars.some(
+                          c => c.type === 'homeassistant' && c.haEntityId === hc.entityId
+                        );
+                        return (
+                          <option key={hc.entityId} value={hc.entityId}>
+                            {hc.name} ({hc.entityId}){alreadyLinked ? ' — al gekoppeld' : ''}
+                          </option>
+                        );
+                      })}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block font-semibold mb-1 text-slate-700 dark:text-slate-300">
+                      Weergavenaam op HomeBoard
+                    </label>
+                    <input
+                      type="text"
+                      value={haCalName}
+                      onChange={e => setHaCalName(e.target.value)}
+                      placeholder="bijv. Schoolvakanties, Werkrooster, Gezin"
+                      className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
+                      required
+                    />
+                  </div>
+
+                  <ColorPickerField
+                    label="Kleur uit volledig spectrum"
+                    value={haCalColor}
+                    onChange={setHaCalColor}
+                  />
+
+                  <CalendarAssignmentControls
+                    familyMembers={familyMembers}
+                    assignmentMode={haAssignmentMode}
+                    memberIds={haMemberIds}
+                    multiDayMode={haMultiDayMode}
+                    onChangeAssignment={(mode, ids) => {
+                      setHaAssignmentMode(mode);
+                      setHaMemberIds(ids);
+                    }}
+                    onChangeMultiDayMode={setHaMultiDayMode}
+                  />
+
+                  <div className="pt-1 flex justify-end">
+                    <button
+                      type="submit"
+                      disabled={isAddingHaCal}
+                      className="px-4 py-2.5 bg-sky-600 hover:bg-sky-700 disabled:opacity-50 text-white font-semibold rounded-lg shadow-xs transition-colors shrink-0"
+                    >
+                      {isAddingHaCal ? 'Bezig met koppelen...' : 'Home Assistant Agenda Koppelen'}
+                    </button>
+                  </div>
+                </form>
+              )}
+            </div>
+          )}
+
+          {/* TAB 3: LOCAL CALENDAR */}
           {activeTab === 'local' && (
             <div className="space-y-4">
               {localSuccess && (
@@ -460,7 +705,11 @@ export const ManageCalendarsModal: React.FC<ManageCalendarsModalProps> = ({
                               <CalendarAssigneeBadge assignees={assignees} />
                             </div>
                             <div className="text-[11px] text-slate-500 truncate mt-0.5">
-                              {cal.type === 'ical' ? 'iCal Feed' : 'Lokale agenda'}
+                              {cal.type === 'ical'
+                                ? 'iCal Feed'
+                                : cal.type === 'homeassistant'
+                                ? `Home Assistant (${cal.haEntityId || 'calendar'})`
+                                : 'Lokale agenda'}
                               {cal.description ? ` · ${cal.description}` : ''}
                             </div>
                           </div>

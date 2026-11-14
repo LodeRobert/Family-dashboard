@@ -3,10 +3,12 @@ import {
   AppSettings,
   AppState,
   CalendarAssignmentMode,
+  CalendarEvent,
   CalendarMultiDayMode,
   CalendarSource,
   Chore,
   ChorePeriod,
+  DailyAutomationRule,
   FamilyMember,
   WeatherLocationResult
 } from '../types';
@@ -14,6 +16,7 @@ import { MemberAvatar } from './MemberAvatar';
 import { ColorPickerField } from './ColorPickerField';
 import { CalendarAssignmentControls } from './CalendarAssignmentControls';
 import { CalendarAssigneeBadge } from './CalendarAssigneeBadge';
+import { HomeAssistantSettingsSection } from './HomeAssistantSettingsSection';
 import { getCalendarAssignees } from '../utils/calendarHelpers';
 import {
   searchWeatherLocations,
@@ -57,6 +60,7 @@ import {
 
 interface SettingsViewProps {
   appState: AppState;
+  allEvents: CalendarEvent[];
   onUpdateSettings: (partial: Partial<AppSettings>) => void;
   onUpdateFamilyMembers: (members: FamilyMember[]) => void;
   onAddFamilyMember: (member: FamilyMember) => void;
@@ -69,6 +73,10 @@ interface SettingsViewProps {
   onDeleteChore: (choreId: string) => void;
   onUpdateCalendars: (calendars: CalendarSource[]) => void;
   onOpenManageCalendars: () => void;
+  onAddDailyRule: (rule: Omit<DailyAutomationRule, 'id'>) => void;
+  onUpdateDailyRule: (ruleId: string, patch: Partial<DailyAutomationRule>) => void;
+  onDeleteDailyRule: (ruleId: string) => void;
+  onHaStatusChanged?: () => void;
   onLockSettings: () => void;
   onRestoreState: (state: AppState) => Promise<void>;
 }
@@ -78,6 +86,7 @@ const CHORE_EMOJIS = ['🪥', '🎒', '📚', '🧸', '🍽️', '✨', '🐾', 
 
 export const SettingsView: React.FC<SettingsViewProps> = ({
   appState,
+  allEvents,
   onUpdateSettings,
   onUpdateFamilyMembers,
   onAddFamilyMember,
@@ -90,6 +99,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   onDeleteChore,
   onUpdateCalendars,
   onOpenManageCalendars,
+  onAddDailyRule,
+  onUpdateDailyRule,
+  onDeleteDailyRule,
+  onHaStatusChanged,
   onLockSettings,
   onRestoreState
 }) => {
@@ -1953,7 +1966,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-xs transition-colors"
             >
               <Link className="w-3.5 h-3.5" />
-              <span>iCal Agenda Koppelen</span>
+              <span>iCal / HA Agenda Koppelen</span>
             </button>
           </div>
         </div>
@@ -2054,7 +2067,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                         <CalendarAssigneeBadge assignees={assignees} />
                       </div>
                       <div className="text-[11px] text-slate-500 truncate mt-0.5">
-                        {cal.type === 'ical' ? 'iCal / ICS Feed' : 'Lokale agenda'}{' '}
+                        {cal.type === 'ical'
+                          ? 'iCal / ICS Feed'
+                          : cal.type === 'homeassistant'
+                          ? `Home Assistant (${cal.haEntityId || 'calendar'})`
+                          : 'Lokale agenda'}{' '}
                         {cal.description ? `· ${cal.description}` : ''}
                       </div>
                     </div>
@@ -2108,6 +2125,18 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           })}
         </div>
       </section>
+
+      {/* SECTION 4B & 4C: Home Assistant Koppeling & Dagelijkse Automaties */}
+      <HomeAssistantSettingsSection
+        calendars={calendars}
+        allEvents={allEvents}
+        rules={appState.dailyAutomationRules || []}
+        initialHaUrl={settings.haUrl || ''}
+        onAddRule={onAddDailyRule}
+        onUpdateRule={onUpdateDailyRule}
+        onDeleteRule={onDeleteDailyRule}
+        onHaStatusChanged={onHaStatusChanged}
+      />
 
       {/* SECTION 5: Wachtwoord wijzigen */}
       <section className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 sm:p-6 shadow-xs space-y-4">

@@ -24,6 +24,31 @@ if (!fs.existsSync(AVATARS_DIR)) {
   fs.mkdirSync(AVATARS_DIR, { recursive: true });
 }
 const DATA_FILE = path.join(DATA_DIR, 'homeboard-data.json');
+const HA_OPTIONS_FILE = '/data/options.json';
+
+interface HaAddonOptions {
+  ha_url?: string;
+  ha_token?: string;
+  tz?: string;
+}
+
+function readHaAddonOptions(): HaAddonOptions {
+  try {
+    if (fs.existsSync(HA_OPTIONS_FILE)) {
+      const raw = fs.readFileSync(HA_OPTIONS_FILE, 'utf-8');
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === 'object' ? parsed : {};
+    }
+  } catch {
+    // Not running inside HA Add-on or options.json not readable
+  }
+  return {};
+}
+
+const initialAddonOpts = readHaAddonOptions();
+if (initialAddonOpts.tz && !process.env.TZ) {
+  process.env.TZ = initialAddonOpts.tz;
+}
 
 function getLocalTodayStr(): string {
   const now = new Date();
@@ -209,6 +234,8 @@ const DEFAULT_INITIAL_STATE = {
       priority: 'low'
     }
   ],
+  haLinkedTodoEntities: [] as any[],
+  dailyAutomationRules: [] as any[],
   rewards: [
     { id: 'rew-1', title: '1 uur gamen / schermtijd 🎮', starsRequired: 10, claimedCount: 0 },
     { id: 'rew-2', title: 'Pannenkoeken of pizza kiezen 🍕', starsRequired: 20, claimedCount: 0 },
@@ -225,6 +252,8 @@ const DEFAULT_INITIAL_STATE = {
     weatherCondition: 'Zonnig',
     weatherCode: 0,
     settingsPasswordHash: '',
+    haUrl: '',
+    haToken: '',
     kioskAutoDim: false,
     kioskDimAfterMinutes: 10,
     kioskTheme: 'auto',
@@ -302,6 +331,13 @@ function getRawStoredData(): any {
       ])
     );
 
+    const haLinkedTodoEntities = Array.isArray(parsed.haLinkedTodoEntities)
+      ? parsed.haLinkedTodoEntities
+      : [];
+    const dailyAutomationRules = Array.isArray(parsed.dailyAutomationRules)
+      ? parsed.dailyAutomationRules
+      : [];
+
     return {
       ...DEFAULT_INITIAL_STATE,
       ...parsed,
@@ -312,6 +348,8 @@ function getRawStoredData(): any {
       starLogsReconciled: true,
       taskLists,
       generalTasks,
+      haLinkedTodoEntities,
+      dailyAutomationRules,
       settings: {
         ...DEFAULT_INITIAL_STATE.settings,
         ...(parsed.settings || {})
@@ -324,13 +362,27 @@ function getRawStoredData(): any {
 }
 
 function sanitizeStateForClient(data: any) {
-  const { settingsPasswordHash, googleClientId: _gcid, customAppUrl: _cau, ...safeSettings } =
-    data.settings || {};
+  const {
+    settingsPasswordHash,
+    haToken,
+    googleClientId: _gcid,
+    customAppUrl: _cau,
+    ...safeSettings
+  } = data.settings || {};
+  const addonOpts = readHaAddonOptions();
+  const hasToken = Boolean(
+    (haToken && String(haToken).trim()) ||
+      process.env.SUPERVISOR_TOKEN ||
+      (addonOpts.ha_token && String(addonOpts.ha_token).trim())
+  );
   return {
     ...data,
     settings: {
       ...safeSettings,
-      hasSettingsPassword: Boolean(settingsPasswordHash)
+      haUrl: safeSettings.haUrl || addonOpts.ha_url || '',
+      hasSettingsPassword: Boolean(settingsPasswordHash),
+      hasHaToken: hasToken,
+      haAddonMode: Boolean(process.env.SUPERVISOR_TOKEN)
     }
   };
 }
@@ -371,7 +423,7 @@ app.get('/api/storage/state', (_req: Request, res: Response) => {
   res.json(sanitizeStateForClient(data));
 });
 
-// Update state (preserves server-side settingsPasswordHash)
+// Update state (preserves server-side settingsPasswordHash and haToken)
 app.post('/api/storage/state', (req: Request, res: Response) => {
   try {
     const updated = req.body;
@@ -379,13 +431,20 @@ app.post('/api/storage/state', (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Ongeldige data' });
     }
     const current = getRawStoredData();
-    const { hasSettingsPassword: _ignore, ...incomingSettings } = updated.settings || {};
+    const {
+      hasSettingsPassword: _ignorePw,
+      hasHaToken: _ignoreHa,
+      haAddonMode: _ignoreAddon,
+      haToken: _ignoreRawToken,
+      ...incomingSettings
+    } = updated.settings || {};
     const mergedToSave = {
       ...updated,
       settings: {
         ...current.settings,
         ...incomingSettings,
-        settingsPasswordHash: current.settings?.settingsPasswordHash || ''
+        settingsPasswordHash: current.settings?.settingsPasswordHash || '',
+        haToken: current.settings?.haToken || ''
       }
     };
     saveStoredData(mergedToSave);
@@ -734,6 +793,774 @@ app.get('/api/ical/fetch', async (req: Request, res: Response) => {
   }
 });
 
+// --- HOME ASSISTANT INTEGRATIE (Supervisor Add-on & Standalone Docker) ---
+
+interface HaConnectionConfig {
+  mode: 'supervisor' | 'manual' | 'none';
+  addonMode: boolean;
+  baseApiUrl: string;
+  baseRootUrl: string;
+  haUrlDisplay: string;
+  token: string;
+  hasToken: boolean;
+}
+
+function getHaConnectionConfig(
+  data?: any,
+  overrideUrl?: string,
+  overrideToken?: string
+): HaConnectionConfig {
+  const supervisorToken = (process.env.SUPERVISOR_TOKEN || '').trim();
+  const addonOpts = readHaAddonOptions();
+  const storedUrl = (overrideUrl ?? data?.settings?.haUrl ?? addonOpts.ha_url ?? '')
+    .trim()
+    .replace(/\/+$/, '');
+  const storedToken = (overrideToken ?? data?.settings?.haToken ?? addonOpts.ha_token ?? '').trim();
+
+  if (storedUrl && storedToken) {
+    return {
+      mode: 'manual',
+      addonMode: Boolean(supervisorToken),
+      baseApiUrl: `${storedUrl}/api`,
+      baseRootUrl: storedUrl,
+      haUrlDisplay: storedUrl,
+      token: storedToken,
+      hasToken: true
+    };
+  }
+
+  if (supervisorToken) {
+    return {
+      mode: 'supervisor',
+      addonMode: true,
+      baseApiUrl: 'http://supervisor/core/api',
+      baseRootUrl: 'http://supervisor/core',
+      haUrlDisplay: storedUrl || 'http://supervisor/core',
+      token: supervisorToken,
+      hasToken: true
+    };
+  }
+
+  return {
+    mode: 'none',
+    addonMode: false,
+    baseApiUrl: '',
+    baseRootUrl: '',
+    haUrlDisplay: storedUrl,
+    token: storedToken,
+    hasToken: Boolean(storedToken)
+  };
+}
+
+async function haFetch(
+  apiPath: string,
+  options: RequestInit = {},
+  overrideConfig?: HaConnectionConfig
+): Promise<any> {
+  const cfg = overrideConfig || getHaConnectionConfig(getRawStoredData());
+  if (cfg.mode === 'none' || !cfg.baseApiUrl || !cfg.token) {
+    throw new Error('Home Assistant is nog niet gekoppeld.');
+  }
+
+  const normalizedPath = apiPath.startsWith('/') ? apiPath : `/${apiPath}`;
+  const url = `${cfg.baseApiUrl}${normalizedPath}`;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 12000);
+
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+      headers: {
+        Authorization: `Bearer ${cfg.token}`,
+        'Content-Type': 'application/json',
+        ...(options.headers || {})
+      }
+    });
+
+    if (!response.ok) {
+      const errText = await response.text().catch(() => '');
+      throw new Error(`Home Assistant fout (${response.status}): ${errText || response.statusText}`);
+    }
+
+    const text = await response.text();
+    if (!text) return null;
+    try {
+      return JSON.parse(text);
+    } catch {
+      return text;
+    }
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function mapHaCalendarEvent(
+  ev: any,
+  idx: number,
+  calendarId: string,
+  calendarName: string,
+  calendarColor: string
+) {
+  const isAllDay = Boolean(ev?.start?.date && !ev?.start?.dateTime);
+  let startTime = '';
+  let endTime = '';
+
+  if (isAllDay) {
+    const startDateStr = String(ev.start.date).slice(0, 10);
+    let endDateStr = startDateStr;
+    if (ev.end?.date) {
+      const rawEnd = String(ev.end.date).slice(0, 10);
+      if (rawEnd > startDateStr) {
+        // Home Assistant / RFC 5545 all-day end.date is exclusive -> subtract 1 day
+        const endDateObj = new Date(`${rawEnd}T00:00:00Z`);
+        if (!Number.isNaN(endDateObj.getTime())) {
+          const inclusive = new Date(endDateObj.getTime() - 24 * 60 * 60 * 1000);
+          const candidate = inclusive.toISOString().slice(0, 10);
+          if (candidate >= startDateStr) {
+            endDateStr = candidate;
+          }
+        }
+      }
+    }
+    startTime = `${startDateStr}T00:00:00`;
+    endTime = `${endDateStr}T23:59:59`;
+  } else {
+    const s = new Date(ev?.start?.dateTime || ev?.start || Date.now());
+    const e = new Date(ev?.end?.dateTime || ev?.end || s);
+    startTime = Number.isNaN(s.getTime()) ? new Date().toISOString() : s.toISOString();
+    endTime = Number.isNaN(e.getTime()) ? startTime : e.toISOString();
+  }
+
+  const uidPart = String(ev.uid || ev.recurrence_id || idx)
+    .replace(/[^a-zA-Z0-9_-]/g, '')
+    .slice(0, 28);
+
+  return {
+    id: `ha-${calendarId}-${uidPart}-${startTime}-${idx}`,
+    calendarId,
+    calendarName,
+    calendarColor,
+    isExternal: true,
+    title: String(ev.summary || 'Agenda-afspraak').trim(),
+    description: ev.description ? String(ev.description) : undefined,
+    location: ev.location ? String(ev.location) : undefined,
+    startTime,
+    endTime,
+    allDay: isAllDay
+  };
+}
+
+async function fetchHaCalendarEvents(
+  entityId: string,
+  calendarId: string,
+  calendarName: string,
+  calendarColor: string,
+  daysPast = 180,
+  daysFuture = 365
+) {
+  const nowMs = Date.now();
+  const startIso = new Date(nowMs - daysPast * 24 * 60 * 60 * 1000).toISOString();
+  const endIso = new Date(nowMs + daysFuture * 24 * 60 * 60 * 1000).toISOString();
+  const rawList = await haFetch(
+    `/calendars/${encodeURIComponent(entityId)}?start=${encodeURIComponent(startIso)}&end=${encodeURIComponent(endIso)}`
+  );
+  if (!Array.isArray(rawList)) return [];
+  const mapped = rawList.map((ev: any, idx: number) =>
+    mapHaCalendarEvent(ev, idx, calendarId, calendarName, calendarColor)
+  );
+  mapped.sort((a: any, b: any) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
+  return mapped;
+}
+
+// Get HA connection status
+app.get('/api/ha/status', async (_req: Request, res: Response) => {
+  const data = getRawStoredData();
+  const cfg = getHaConnectionConfig(data);
+
+  if (cfg.mode === 'none') {
+    return res.json({
+      connected: false,
+      mode: 'none',
+      addonMode: cfg.addonMode,
+      haUrl: cfg.haUrlDisplay,
+      hasToken: cfg.hasToken
+    });
+  }
+
+  try {
+    const haConfig = await haFetch('/config', {}, cfg);
+    res.json({
+      connected: true,
+      mode: cfg.mode,
+      addonMode: cfg.addonMode,
+      haUrl: cfg.haUrlDisplay,
+      hasToken: cfg.hasToken,
+      locationName: haConfig?.location_name || 'Home Assistant',
+      version: haConfig?.version || ''
+    });
+  } catch (error: any) {
+    res.json({
+      connected: false,
+      mode: cfg.mode,
+      addonMode: cfg.addonMode,
+      haUrl: cfg.haUrlDisplay,
+      hasToken: cfg.hasToken,
+      error: error.message || 'Kan Home Assistant niet bereiken'
+    });
+  }
+});
+
+// Save HA manual URL/Token configuration & return updated status
+app.post('/api/ha/config', async (req: Request, res: Response) => {
+  try {
+    const rawUrl = String(req.body?.haUrl || '').trim().replace(/\/+$/, '');
+    const rawToken = req.body?.haToken !== undefined ? String(req.body.haToken).trim() : undefined;
+    const clearToken = Boolean(req.body?.clearToken);
+
+    const data = getRawStoredData();
+    const nextToken = clearToken
+      ? ''
+      : rawToken && rawToken.length > 0
+      ? rawToken
+      : data.settings?.haToken || '';
+
+    data.settings = {
+      ...data.settings,
+      haUrl: rawUrl,
+      haToken: nextToken
+    };
+    saveStoredData(data);
+
+    const cfg = getHaConnectionConfig(data);
+    if (cfg.mode === 'none') {
+      return res.json({
+        connected: false,
+        mode: 'none',
+        addonMode: cfg.addonMode,
+        haUrl: cfg.haUrlDisplay,
+        hasToken: cfg.hasToken
+      });
+    }
+
+    try {
+      const haConfig = await haFetch('/config', {}, cfg);
+      return res.json({
+        connected: true,
+        mode: cfg.mode,
+        addonMode: cfg.addonMode,
+        haUrl: cfg.haUrlDisplay,
+        hasToken: cfg.hasToken,
+        locationName: haConfig?.location_name || 'Home Assistant',
+        version: haConfig?.version || ''
+      });
+    } catch (err: any) {
+      return res.json({
+        connected: false,
+        mode: cfg.mode,
+        addonMode: cfg.addonMode,
+        haUrl: cfg.haUrlDisplay,
+        hasToken: cfg.hasToken,
+        error: err.message || 'Opgeslagen, maar verbinding mislukt'
+      });
+    }
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || 'Kon HA configuratie niet opslaan.' });
+  }
+});
+
+// Test HA connection
+app.post('/api/ha/test', async (req: Request, res: Response) => {
+  try {
+    const data = getRawStoredData();
+    const overrideUrl = req.body?.haUrl !== undefined ? String(req.body.haUrl) : undefined;
+    const overrideToken =
+      req.body?.haToken && String(req.body.haToken).trim()
+        ? String(req.body.haToken).trim()
+        : undefined;
+    const cfg = getHaConnectionConfig(data, overrideUrl, overrideToken);
+
+    if (cfg.mode === 'none') {
+      return res.status(400).json({ error: 'Vul een Home Assistant URL en Access Token in.' });
+    }
+
+    const haConfig = await haFetch('/config', {}, cfg);
+    const states = await haFetch('/states', {}, cfg).catch(() => []);
+    const calCount = Array.isArray(states)
+      ? states.filter((s: any) => String(s?.entity_id || '').startsWith('calendar.')).length
+      : 0;
+    const todoCount = Array.isArray(states)
+      ? states.filter((s: any) => String(s?.entity_id || '').startsWith('todo.')).length
+      : 0;
+
+    res.json({
+      connected: true,
+      mode: cfg.mode,
+      locationName: haConfig?.location_name || 'Home Assistant',
+      version: haConfig?.version || '',
+      calendarCount: calCount,
+      todoCount
+    });
+  } catch (error: any) {
+    res.status(502).json({
+      connected: false,
+      error: error.message || 'Verbinding met Home Assistant mislukt.'
+    });
+  }
+});
+
+// List HA calendar.* entities
+app.get('/api/ha/calendars', async (_req: Request, res: Response) => {
+  try {
+    const list = await haFetch('/calendars');
+    const calendars = Array.isArray(list)
+      ? list.map((c: any) => ({
+          entityId: c.entity_id,
+          name: c.name || c.entity_id
+        }))
+      : [];
+    res.json({ calendars });
+  } catch (error: any) {
+    res.status(502).json({ error: error.message || 'Kon Home Assistant agenda\'s niet ophalen.' });
+  }
+});
+
+// Fetch events for an HA calendar entity
+app.get('/api/ha/calendars/events', async (req: Request, res: Response) => {
+  const entityId = String(req.query.entityId || '').trim();
+  const calendarId = String(req.query.calendarId || `ha-${entityId}`);
+  const calendarName = String(req.query.calendarName || 'Home Assistant Agenda');
+  const calendarColor = String(req.query.calendarColor || '#03A9F4');
+
+  if (!entityId) {
+    return res.status(400).json({ error: 'entityId parameter ontbreekt' });
+  }
+
+  try {
+    const events = await fetchHaCalendarEvents(entityId, calendarId, calendarName, calendarColor);
+    res.json({ success: true, count: events.length, events });
+  } catch (error: any) {
+    res.status(502).json({
+      error: `Kan Home Assistant agenda (${entityId}) niet ophalen: ${error.message}`
+    });
+  }
+});
+
+// List HA todo.* entities
+app.get('/api/ha/todos', async (_req: Request, res: Response) => {
+  try {
+    const states = await haFetch('/states');
+    const todos = Array.isArray(states)
+      ? states
+          .filter((s: any) => String(s?.entity_id || '').startsWith('todo.'))
+          .map((s: any) => ({
+            entityId: s.entity_id,
+            name: s.attributes?.friendly_name || s.entity_id,
+            count: s.state
+          }))
+      : [];
+    res.json({ todos });
+  } catch (error: any) {
+    res.status(502).json({ error: error.message || 'Kon Home Assistant takenlijsten niet ophalen.' });
+  }
+});
+
+// Get items inside an HA todo.* list
+app.get('/api/ha/todos/items', async (req: Request, res: Response) => {
+  const entityId = String(req.query.entityId || '').trim();
+  if (!entityId) {
+    return res.status(400).json({ error: 'entityId parameter ontbreekt' });
+  }
+  try {
+    const resp = await haFetch('/services/todo/get_items?return_response', {
+      method: 'POST',
+      body: JSON.stringify({ entity_id: entityId })
+    });
+    const rawItems = resp?.service_response?.[entityId]?.items || [];
+    const items = Array.isArray(rawItems)
+      ? rawItems.map((it: any) => ({
+          uid: String(it.uid || it.summary),
+          summary: String(it.summary || ''),
+          status: it.status === 'completed' ? 'completed' : 'needs_action',
+          due: it.due ? String(it.due) : undefined,
+          description: it.description ? String(it.description) : undefined
+        }))
+      : [];
+    res.json({ items });
+  } catch (error: any) {
+    res.status(502).json({ error: error.message || 'Kon taken uit Home Assistant niet laden.' });
+  }
+});
+
+// Add item to an HA todo.* list
+app.post('/api/ha/todos/items/add', async (req: Request, res: Response) => {
+  const entityId = String(req.body?.entityId || '').trim();
+  const item = String(req.body?.item || '').trim();
+  const dueDate = req.body?.dueDate ? String(req.body.dueDate).trim() : '';
+  const description = req.body?.description ? String(req.body.description).trim() : '';
+
+  if (!entityId || !item) {
+    return res.status(400).json({ error: 'entityId en item zijn verplicht' });
+  }
+
+  try {
+    const payload: Record<string, any> = { entity_id: entityId, item };
+    if (dueDate) payload.due_date = dueDate;
+    if (description) payload.description = description;
+
+    await haFetch('/services/todo/add_item', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(502).json({ error: error.message || 'Kon item niet toevoegen in Home Assistant.' });
+  }
+});
+
+// Update item in an HA todo.* list (toggle status / rename / due / description)
+app.post('/api/ha/todos/items/update', async (req: Request, res: Response) => {
+  const entityId = String(req.body?.entityId || '').trim();
+  const uid = String(req.body?.uid || '').trim();
+  if (!entityId || !uid) {
+    return res.status(400).json({ error: 'entityId en uid zijn verplicht' });
+  }
+
+  try {
+    const payload: Record<string, any> = { entity_id: entityId, item: uid };
+    if (req.body?.rename !== undefined) payload.rename = String(req.body.rename);
+    if (req.body?.status !== undefined) payload.status = req.body.status;
+    if (req.body?.dueDate !== undefined) payload.due_date = req.body.dueDate || null;
+    if (req.body?.description !== undefined) payload.description = req.body.description;
+
+    await haFetch('/services/todo/update_item', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(502).json({ error: error.message || 'Kon item in Home Assistant niet bijwerken.' });
+  }
+});
+
+// Remove item from an HA todo.* list
+app.post('/api/ha/todos/items/remove', async (req: Request, res: Response) => {
+  const entityId = String(req.body?.entityId || '').trim();
+  const uid = String(req.body?.uid || '').trim();
+  if (!entityId || !uid) {
+    return res.status(400).json({ error: 'entityId en uid zijn verplicht' });
+  }
+
+  try {
+    await haFetch('/services/todo/remove_item', {
+      method: 'POST',
+      body: JSON.stringify({ entity_id: entityId, item: [uid] })
+    });
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(502).json({ error: error.message || 'Kon item uit Home Assistant niet verwijderen.' });
+  }
+});
+
+// Clear completed items in an HA todo.* list
+app.post('/api/ha/todos/items/clear-completed', async (req: Request, res: Response) => {
+  const entityId = String(req.body?.entityId || '').trim();
+  if (!entityId) {
+    return res.status(400).json({ error: 'entityId is verplicht' });
+  }
+
+  try {
+    await haFetch('/services/todo/remove_completed_items', {
+      method: 'POST',
+      body: JSON.stringify({ entity_id: entityId })
+    });
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(502).json({ error: error.message || 'Kon afgeronde items niet wissen in Home Assistant.' });
+  }
+});
+
+// List HA actionable entities (automations, scripts, scenes, switches, lights, input_booleans)
+app.get('/api/ha/entities', async (_req: Request, res: Response) => {
+  const allowedDomains = new Set([
+    'automation',
+    'script',
+    'scene',
+    'switch',
+    'light',
+    'input_boolean'
+  ]);
+
+  try {
+    const states = await haFetch('/states');
+    const entities = Array.isArray(states)
+      ? states
+          .map((s: any) => {
+            const entityId = String(s?.entity_id || '');
+            const domain = entityId.split('.')[0] || '';
+            return {
+              entityId,
+              domain,
+              name: String(s?.attributes?.friendly_name || entityId)
+            };
+          })
+          .filter(e => allowedDomains.has(e.domain))
+          .sort((a, b) => a.domain.localeCompare(b.domain) || a.name.localeCompare(b.name))
+      : [];
+    res.json({ entities });
+  } catch (error: any) {
+    res.status(502).json({ error: error.message || 'Kon Home Assistant entiteiten niet ophalen.' });
+  }
+});
+
+// --- 24/7 DAILY AUTOMATION SCHEDULER WITH VACATION / CALENDAR SUPPRESSION ---
+
+const schedulerCalendarCache = new Map<string, { fetchedAt: number; events: any[] }>();
+const SCHEDULER_CACHE_TTL_MS = 5 * 60 * 1000;
+
+function serverEventOccursOnDate(evt: any, dateStr: string): boolean {
+  if (!evt?.startTime) return false;
+  if (evt.allDay) {
+    const s = String(evt.startTime).split('T')[0];
+    const e = String(evt.endTime || evt.startTime).split('T')[0];
+    return s === dateStr || (s <= dateStr && e >= dateStr);
+  }
+  const start = new Date(evt.startTime);
+  const end = new Date(evt.endTime || evt.startTime);
+  if (Number.isNaN(start.getTime())) return false;
+  const sStr = formatDateYYYYMMDD(start);
+  let eStr = sStr;
+  if (!Number.isNaN(end.getTime())) {
+    if (
+      end.getTime() > start.getTime() &&
+      end.getHours() === 0 &&
+      end.getMinutes() === 0 &&
+      end.getSeconds() === 0
+    ) {
+      eStr = formatDateYYYYMMDD(new Date(end.getTime() - 1));
+    } else {
+      eStr = formatDateYYYYMMDD(end);
+    }
+  }
+  return sStr === dateStr || (sStr <= dateStr && eStr >= dateStr);
+}
+
+async function getCalendarEventsForScheduler(cal: any, localEvents: any[]): Promise<any[]> {
+  if (!cal) return [];
+  if (cal.type === 'local') {
+    return localEvents.filter((e: any) => e.calendarId === cal.id);
+  }
+
+  const cached = schedulerCalendarCache.get(cal.id);
+  if (cached && Date.now() - cached.fetchedAt < SCHEDULER_CACHE_TTL_MS) {
+    return cached.events;
+  }
+
+  try {
+    let events: any[] = [];
+    if (cal.type === 'ical' && cal.url) {
+      const normalizedUrl = String(cal.url).replace(/^webcal:\/\//i, 'https://');
+      const resp = await fetch(normalizedUrl, {
+        headers: { 'User-Agent': 'HomeBoard-Family-Dashboard/1.0' }
+      });
+      if (resp.ok) {
+        const icsText = await resp.text();
+        events = parseICS(icsText, cal.id, cal.name, cal.color);
+      }
+    } else if (cal.type === 'homeassistant' && cal.haEntityId) {
+      events = await fetchHaCalendarEvents(cal.haEntityId, cal.id, cal.name, cal.color, 7, 30);
+    }
+    schedulerCalendarCache.set(cal.id, { fetchedAt: Date.now(), events });
+    return events;
+  } catch (err) {
+    console.warn(`[Scheduler] Kon agenda "${cal.name}" niet verversen voor controle:`, err);
+    return cached?.events || [];
+  }
+}
+
+async function evaluateRuleSkipServer(rule: any, data: any, dateStr: string): Promise<{ skipped: boolean; reason?: string }> {
+  const skipIds: string[] = Array.isArray(rule.skipCalendarIds) ? rule.skipCalendarIds : [];
+  if (skipIds.length === 0) return { skipped: false };
+
+  const keywords = String(rule.skipKeywords || '')
+    .split(',')
+    .map(k => k.trim().toLowerCase())
+    .filter(Boolean);
+
+  const calendars: any[] = Array.isArray(data.calendars) ? data.calendars : [];
+  const localEvents: any[] = Array.isArray(data.events) ? data.events : [];
+
+  for (const calId of skipIds) {
+    const cal = calendars.find(c => c.id === calId);
+    if (!cal) continue;
+    const calEvents = await getCalendarEventsForScheduler(cal, localEvents);
+    for (const evt of calEvents) {
+      if (!serverEventOccursOnDate(evt, dateStr)) continue;
+      if (keywords.length > 0) {
+        const haystack = `${evt.title || ''} ${evt.description || ''}`.toLowerCase();
+        if (!keywords.some(kw => haystack.includes(kw))) continue;
+      }
+      return {
+        skipped: true,
+        reason: `${cal.name}: ${evt.title}`
+      };
+    }
+  }
+
+  return { skipped: false };
+}
+
+async function fireRuleToHomeAssistant(rule: any, dateStr: string, data: any): Promise<void> {
+  const cfg = getHaConnectionConfig(data);
+  if (cfg.mode === 'none') {
+    throw new Error('Home Assistant is niet gekoppeld.');
+  }
+
+  // 1. Always emit the HomeBoard event on Home Assistant's Event Bus
+  await haFetch(
+    '/events/homeboard_daily_trigger',
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        rule_id: rule.id,
+        title: rule.title,
+        time: rule.time,
+        date: dateStr,
+        target_entity: rule.haTargetEntityId || null
+      })
+    },
+    cfg
+  );
+
+  // 2. If a target entity is chosen, call the matching service
+  const target = String(rule.haTargetEntityId || '').trim();
+  if (target) {
+    const domain = target.split('.')[0];
+    if (domain === 'automation') {
+      await haFetch(
+        '/services/automation/trigger',
+        { method: 'POST', body: JSON.stringify({ entity_id: target, skip_condition: false }) },
+        cfg
+      );
+    } else if (domain === 'script') {
+      await haFetch(
+        '/services/script/turn_on',
+        { method: 'POST', body: JSON.stringify({ entity_id: target }) },
+        cfg
+      );
+    } else if (domain === 'scene') {
+      await haFetch(
+        '/services/scene/turn_on',
+        { method: 'POST', body: JSON.stringify({ entity_id: target }) },
+        cfg
+      );
+    } else {
+      await haFetch(
+        '/services/homeassistant/turn_on',
+        { method: 'POST', body: JSON.stringify({ entity_id: target }) },
+        cfg
+      );
+    }
+  }
+
+  // 3. Optional Webhook trigger
+  const webhookId = String(rule.haWebhookId || '').trim();
+  if (webhookId) {
+    await fetch(`${cfg.baseApiUrl}/webhook/${encodeURIComponent(webhookId)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rule_id: rule.id, title: rule.title, time: rule.time, date: dateStr })
+    }).catch(() => {});
+  }
+}
+
+let schedulerRunning = false;
+
+async function runDailyAutomationScheduler() {
+  if (schedulerRunning) return;
+  schedulerRunning = true;
+  try {
+    const data = getRawStoredData();
+    const rules: any[] = Array.isArray(data.dailyAutomationRules) ? data.dailyAutomationRules : [];
+    if (rules.length === 0) return;
+
+    const now = new Date();
+    const todayStr = getLocalTodayStr();
+    const dayOfWeek = now.getDay();
+    const nowMinutes = now.getHours() * 60 + now.getMinutes();
+
+    let mutated = false;
+
+    for (const rule of rules) {
+      if (!rule?.enabled) continue;
+      if (!Array.isArray(rule.daysOfWeek) || !rule.daysOfWeek.includes(dayOfWeek)) continue;
+      if (rule.lastTriggeredDate === todayStr || rule.lastSkippedDate === todayStr) continue;
+
+      const match = String(rule.time || '').match(/^(\d{1,2}):(\d{2})$/);
+      if (!match) continue;
+      const ruleMinutes = Number(match[1]) * 60 + Number(match[2]);
+
+      // Trigger within [ruleMinutes, ruleMinutes + 2] window (catches up if tick drifted slightly)
+      if (nowMinutes < ruleMinutes || nowMinutes > ruleMinutes + 2) continue;
+
+      const skipCheck = await evaluateRuleSkipServer(rule, data, todayStr);
+      if (skipCheck.skipped) {
+        rule.lastSkippedDate = todayStr;
+        rule.lastSkippedReason = skipCheck.reason || 'Gepauzeerd via gekoppelde agenda';
+        mutated = true;
+        console.log(`[HomeBoard Scheduler] "${rule.title}" gepauzeerd vandaag (${rule.lastSkippedReason})`);
+        continue;
+      }
+
+      try {
+        await fireRuleToHomeAssistant(rule, todayStr, data);
+        rule.lastTriggeredDate = todayStr;
+        rule.lastTriggeredAt = now.toISOString();
+        rule.lastSkippedDate = undefined;
+        rule.lastSkippedReason = undefined;
+        mutated = true;
+        console.log(`[HomeBoard Scheduler] "${rule.title}" (${rule.time}) uitgevoerd in Home Assistant.`);
+      } catch (err: any) {
+        console.warn(`[HomeBoard Scheduler] Kon "${rule.title}" niet uitvoeren:`, err?.message || err);
+      }
+    }
+
+    if (mutated) {
+      saveStoredData(data);
+    }
+  } catch (err) {
+    console.error('[HomeBoard Scheduler] Fout in scheduler:', err);
+  } finally {
+    schedulerRunning = false;
+  }
+}
+
+// Manual test endpoint for a DailyAutomationRule
+app.post('/api/ha/rules/:id/test', async (req: Request, res: Response) => {
+  try {
+    const ruleId = req.params.id;
+    const data = getRawStoredData();
+    const rule = (data.dailyAutomationRules || []).find((r: any) => r.id === ruleId);
+    if (!rule) {
+      return res.status(404).json({ error: 'Dagelijkse afspraak niet gevonden.' });
+    }
+
+    const todayStr = getLocalTodayStr();
+    const skipCheck = await evaluateRuleSkipServer(rule, data, todayStr);
+    await fireRuleToHomeAssistant(rule, todayStr, data);
+
+    res.json({
+      success: true,
+      skippedTodayWouldBe: skipCheck.skipped,
+      skipReason: skipCheck.reason || null
+    });
+  } catch (error: any) {
+    res.status(502).json({
+      error: error.message || 'Kon Home Assistant automatie niet testen.'
+    });
+  }
+});
+
 // --- CLIENT SERVING ---
 async function setupServer() {
   if (!isProduction) {
@@ -761,6 +1588,12 @@ async function setupServer() {
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`🏠 HomeBoard server running at http://0.0.0.0:${PORT} (ENV: ${process.env.NODE_ENV || 'development'})`);
   });
+
+  // Start 24/7 daily automation scheduler (ticks every 20s)
+  setTimeout(() => {
+    runDailyAutomationScheduler();
+    setInterval(runDailyAutomationScheduler, 20000);
+  }, 5000);
 }
 
 setupServer().catch(err => {

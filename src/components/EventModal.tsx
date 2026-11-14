@@ -235,14 +235,19 @@ export const EventModal: React.FC<EventModalProps> = ({
                       return (
                         <option key={cal.id} value={cal.id}>
                           {cal.name} ({assignees.label})
-                          {cal.type === 'ical' ? ' - iCal' : ''}
+                          {cal.type === 'ical'
+                            ? ' - iCal'
+                            : cal.type === 'homeassistant'
+                            ? ' - Home Assistant'
+                            : ''}
                         </option>
                       );
                     })}
                 </select>
-                {selectedCalendar?.type === 'ical' && (
+                {(selectedCalendar?.type === 'ical' ||
+                  selectedCalendar?.type === 'homeassistant') && (
                   <span className="text-[10px] text-amber-500 mt-1 block">
-                    iCal-feeds worden gesynchroniseerd vanuit je externe agenda.
+                    Externe agenda's worden automatisch gesynchroniseerd.
                   </span>
                 )}
               </div>

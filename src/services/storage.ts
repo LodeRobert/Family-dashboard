@@ -1,5 +1,16 @@
-import { AppState, CalendarEvent, CalendarSource, WeatherLocationResult } from '../types';
+import {
+  AppState,
+  CalendarEvent,
+  CalendarSource,
+  HaActionEntity,
+  HaCalendarEntity,
+  HaStatusInfo,
+  HaTodoEntity,
+  HaTodoItem,
+  WeatherLocationResult
+} from '../types';
 import { getLocalDateStr } from '../utils/dateTime';
+import { apiUrl } from '../utils/api';
 
 const LOCAL_STORAGE_KEY = 'homeboard_state_v1';
 
@@ -123,6 +134,8 @@ const FALLBACK_DEFAULT_STATE: AppState = {
       priority: 'low'
     }
   ],
+  haLinkedTodoEntities: [],
+  dailyAutomationRules: [],
   rewards: [
     { id: 'rew-1', title: '1 uur gamen / schermtijd 🎮', starsRequired: 10, claimedCount: 0 },
     { id: 'rew-2', title: 'Pannenkoeken of pizza kiezen 🍕', starsRequired: 20, claimedCount: 0 },
@@ -212,6 +225,13 @@ function normalizeState(raw: any): AppState {
     ])
   );
 
+  const haLinkedTodoEntities = Array.isArray(raw?.haLinkedTodoEntities)
+    ? raw.haLinkedTodoEntities
+    : [];
+  const dailyAutomationRules = Array.isArray(raw?.dailyAutomationRules)
+    ? raw.dailyAutomationRules
+    : [];
+
   return {
     ...FALLBACK_DEFAULT_STATE,
     ...raw,
@@ -222,6 +242,8 @@ function normalizeState(raw: any): AppState {
     starLogsReconciled: true,
     taskLists,
     generalTasks,
+    haLinkedTodoEntities,
+    dailyAutomationRules,
     settings: {
       ...FALLBACK_DEFAULT_STATE.settings,
       ...(raw?.settings || {})
@@ -231,7 +253,7 @@ function normalizeState(raw: any): AppState {
 
 export async function loadAppState(): Promise<AppState> {
   try {
-    const res = await fetch('/api/storage/state');
+    const res = await fetch(apiUrl('/api/storage/state'));
     if (res.ok) {
       const data = normalizeState(await res.json());
       localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(data));
@@ -257,7 +279,7 @@ export async function saveAppState(state: AppState): Promise<void> {
   localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(state));
 
   try {
-    await fetch('/api/storage/state', {
+    await fetch(apiUrl('/api/storage/state'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
@@ -270,7 +292,7 @@ export async function saveAppState(state: AppState): Promise<void> {
 }
 
 export async function setupSettingsPassword(password: string): Promise<void> {
-  const res = await fetch('/api/settings/password/setup', {
+  const res = await fetch(apiUrl('/api/settings/password/setup'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ password })
@@ -282,7 +304,7 @@ export async function setupSettingsPassword(password: string): Promise<void> {
 }
 
 export async function verifySettingsPassword(password: string): Promise<boolean> {
-  const res = await fetch('/api/settings/password/verify', {
+  const res = await fetch(apiUrl('/api/settings/password/verify'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ password })
@@ -301,7 +323,7 @@ export async function changeSettingsPassword(
   currentPassword: string,
   newPassword: string
 ): Promise<void> {
-  const res = await fetch('/api/settings/password/change', {
+  const res = await fetch(apiUrl('/api/settings/password/change'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ currentPassword, newPassword })
@@ -315,7 +337,9 @@ export async function changeSettingsPassword(
 export async function fetchICalFeedEvents(cal: CalendarSource): Promise<CalendarEvent[]> {
   if (!cal.url) return [];
   try {
-    const url = `/api/ical/fetch?url=${encodeURIComponent(cal.url)}&calendarId=${encodeURIComponent(cal.id)}&calendarName=${encodeURIComponent(cal.name)}&calendarColor=${encodeURIComponent(cal.color)}`;
+    const url = apiUrl(
+      `/api/ical/fetch?url=${encodeURIComponent(cal.url)}&calendarId=${encodeURIComponent(cal.id)}&calendarName=${encodeURIComponent(cal.name)}&calendarColor=${encodeURIComponent(cal.color)}`
+    );
     const res = await fetch(url);
     if (!res.ok) {
       throw new Error(`Server status ${res.status}`);
@@ -328,9 +352,187 @@ export async function fetchICalFeedEvents(cal: CalendarSource): Promise<Calendar
   }
 }
 
+export async function fetchHaCalendarEvents(cal: CalendarSource): Promise<CalendarEvent[]> {
+  if (!cal.haEntityId) return [];
+  try {
+    const url = apiUrl(
+      `/api/ha/calendars/events?entityId=${encodeURIComponent(cal.haEntityId)}&calendarId=${encodeURIComponent(cal.id)}&calendarName=${encodeURIComponent(cal.name)}&calendarColor=${encodeURIComponent(cal.color)}`
+    );
+    const res = await fetch(url);
+    if (!res.ok) {
+      throw new Error(`Server status ${res.status}`);
+    }
+    const data = await res.json();
+    return data.events || [];
+  } catch (error) {
+    console.error(`Fout bij ophalen Home Assistant agenda voor ${cal.name}:`, error);
+    return [];
+  }
+}
+
+export async function fetchHaStatus(): Promise<HaStatusInfo> {
+  const res = await fetch(apiUrl('/api/ha/status'));
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.error || 'Kon Home Assistant status niet ophalen.');
+  }
+  return data;
+}
+
+export async function saveHaConfig(payload: {
+  haUrl: string;
+  haToken?: string;
+  clearToken?: boolean;
+}): Promise<HaStatusInfo> {
+  const res = await fetch(apiUrl('/api/ha/config'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.error || 'Kon Home Assistant koppeling niet opslaan.');
+  }
+  return data;
+}
+
+export async function testHaConnection(payload?: {
+  haUrl?: string;
+  haToken?: string;
+}): Promise<{
+  connected: boolean;
+  mode: string;
+  locationName?: string;
+  version?: string;
+  calendarCount?: number;
+  todoCount?: number;
+}> {
+  const res = await fetch(apiUrl('/api/ha/test'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload || {})
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.error || 'Verbinding met Home Assistant mislukt.');
+  }
+  return data;
+}
+
+export async function fetchHaCalendars(): Promise<HaCalendarEntity[]> {
+  const res = await fetch(apiUrl('/api/ha/calendars'));
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.error || 'Kon Home Assistant agenda\'s niet ophalen.');
+  }
+  return data.calendars || [];
+}
+
+export async function fetchHaTodoEntities(): Promise<HaTodoEntity[]> {
+  const res = await fetch(apiUrl('/api/ha/todos'));
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.error || 'Kon Home Assistant takenlijsten niet ophalen.');
+  }
+  return data.todos || [];
+}
+
+export async function fetchHaTodoItems(entityId: string): Promise<HaTodoItem[]> {
+  const res = await fetch(apiUrl(`/api/ha/todos/items?entityId=${encodeURIComponent(entityId)}`));
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.error || 'Kon Home Assistant taken niet ophalen.');
+  }
+  return data.items || [];
+}
+
+export async function addHaTodoItem(payload: {
+  entityId: string;
+  item: string;
+  dueDate?: string;
+  description?: string;
+}): Promise<void> {
+  const res = await fetch(apiUrl('/api/ha/todos/items/add'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.error || 'Kon taak niet toevoegen in Home Assistant.');
+  }
+}
+
+export async function updateHaTodoItem(payload: {
+  entityId: string;
+  uid: string;
+  rename?: string;
+  status?: 'needs_action' | 'completed';
+  dueDate?: string | null;
+  description?: string;
+}): Promise<void> {
+  const res = await fetch(apiUrl('/api/ha/todos/items/update'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.error || 'Kon taak in Home Assistant niet bijwerken.');
+  }
+}
+
+export async function removeHaTodoItem(entityId: string, uid: string): Promise<void> {
+  const res = await fetch(apiUrl('/api/ha/todos/items/remove'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ entityId, uid })
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.error || 'Kon taak niet verwijderen uit Home Assistant.');
+  }
+}
+
+export async function clearCompletedHaTodoItems(entityId: string): Promise<void> {
+  const res = await fetch(apiUrl('/api/ha/todos/items/clear-completed'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ entityId })
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.error || 'Kon afgeronde taken niet wissen.');
+  }
+}
+
+export async function fetchHaActionEntities(): Promise<HaActionEntity[]> {
+  const res = await fetch(apiUrl('/api/ha/entities'));
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.error || 'Kon Home Assistant entiteiten niet ophalen.');
+  }
+  return data.entities || [];
+}
+
+export async function testDailyAutomationRule(ruleId: string): Promise<{
+  success: boolean;
+  skippedTodayWouldBe: boolean;
+  skipReason: string | null;
+}> {
+  const res = await fetch(apiUrl(`/api/ha/rules/${encodeURIComponent(ruleId)}/test`), {
+    method: 'POST'
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.error || 'Kon automatie niet testen in Home Assistant.');
+  }
+  return data;
+}
+
 export async function searchWeatherLocations(query: string): Promise<WeatherLocationResult[]> {
   if (!query || query.trim().length < 2) return [];
-  const res = await fetch(`/api/weather/search?q=${encodeURIComponent(query.trim())}`);
+  const res = await fetch(apiUrl(`/api/weather/search?q=${encodeURIComponent(query.trim())}`));
   if (!res.ok) {
     throw new Error('Kon woonplaatsen niet ophalen');
   }
@@ -342,7 +544,7 @@ export async function fetchCurrentWeather(
   lat: number,
   lon: number
 ): Promise<{ temp: number; condition: string; weatherCode: number }> {
-  const res = await fetch(`/api/weather/current?lat=${lat}&lon=${lon}`);
+  const res = await fetch(apiUrl(`/api/weather/current?lat=${lat}&lon=${lon}`));
   if (!res.ok) {
     throw new Error('Kon actueel weer niet ophalen');
   }
@@ -383,7 +585,7 @@ export async function uploadMemberAvatar(memberId: string, file: File): Promise<
   const imageDataUrl = await resizeImageFileToDataUrl(file, 256);
 
   try {
-    const res = await fetch('/api/avatars', {
+    const res = await fetch(apiUrl('/api/avatars'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ memberId, imageDataUrl })

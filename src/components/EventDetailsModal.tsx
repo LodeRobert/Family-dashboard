@@ -67,7 +67,19 @@ export const EventDetailsModal: React.FC<EventDetailsModalProps> = ({
   const calColor = calendar?.color || event.calendarColor || '#6366F1';
   const calName = calendar?.name || event.calendarName || 'Agenda';
   const assignees = resolveEventAssignees(event, calendar, familyMembers);
-  const isReadOnly = Boolean(event.isExternal || calendar?.type === 'ical');
+  const isReadOnly = Boolean(
+    event.isExternal ||
+      event.isDailyRule ||
+      calendar?.type === 'ical' ||
+      calendar?.type === 'homeassistant'
+  );
+  const sourceLabel = event.isDailyRule
+    ? 'Dagelijkse afspraak & automatie'
+    : calendar?.type === 'homeassistant'
+    ? 'Home Assistant agenda'
+    : calendar?.type === 'ical' || event.isExternal
+    ? 'iCal-agenda'
+    : 'Lokale agenda';
 
   const startDateStr = getEventStartDateStr(event);
   const endDateStr = getEventEndDateStr(event);
@@ -132,11 +144,11 @@ export const EventDetailsModal: React.FC<EventDetailsModalProps> = ({
             {isReadOnly ? (
               <span className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-500 dark:text-slate-400 shrink-0">
                 <Lock className="w-3 h-3" />
-                <span>iCal-agenda</span>
+                <span>{sourceLabel}</span>
               </span>
             ) : (
               <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400 shrink-0">
-                Lokale agenda
+                {sourceLabel}
               </span>
             )}
           </div>
@@ -275,9 +287,13 @@ export const EventDetailsModal: React.FC<EventDetailsModalProps> = ({
 
         {/* Footer Actions */}
         <div className="px-6 py-3.5 bg-slate-50/80 dark:bg-slate-800/40 border-t border-slate-100 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          {isReadOnly ? (
+          {event.isDailyRule ? (
             <p className="text-[11px] text-slate-500 dark:text-slate-400">
-              Gesynchroniseerd via iCal — wijzigen kan in je externe agenda.
+              Automatische dagelijkse regel — aanpassen kan in Instellingen.
+            </p>
+          ) : isReadOnly ? (
+            <p className="text-[11px] text-slate-500 dark:text-slate-400">
+              Gesynchroniseerd ({sourceLabel}) — wijzigen kan in je externe agenda.
             </p>
           ) : (
             <span className="text-[11px] text-slate-400 dark:text-slate-500">

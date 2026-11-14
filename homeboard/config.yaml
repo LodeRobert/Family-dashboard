@@ -1,0 +1,32 @@
+name: "HomeBoard"
+version: "1.2.0"
+slug: "homeboard"
+description: "Zelf-gehost familiedashboard met kalenders (iCal & Home Assistant), sterren-takenbord, To-Do lijsten en dagelijkse automaties met vakantie-pauze."
+arch:
+  - amd64
+  - aarch64
+startup: services
+boot: auto
+init: false
+ingress: true
+ingress_port: 3000
+panel_icon: "mdi:calendar-star"
+panel_title: "HomeBoard"
+homeassistant_api: true
+hassio_api: true
+ports:
+  3000/tcp: 3000
+ports_description:
+  3000/tcp: "Directe webinterface (optioneel naast Home Assistant zijbalk/Ingress)"
+options:
+  tz: "Europe/Amsterdam"
+  ha_url: ""
+  ha_token: ""
+schema:
+  tz: "str?"
+  ha_url: "str?"
+  ha_token: "password?"
+# Tip: Publiceer je image via GitHub Actions (.github/workflows/docker-publish.yml)
+# en zet onderstaande regel aan met jouw GitHub gebruikersnaam & repo-naam (kleine letters),
+# zodat Home Assistant direct het kant-en-klare image downloadt zonder zelf te hoeven bouwen:
+# image: "ghcr.io/<jouw-gebruikersnaam>/<jouw-repo>"

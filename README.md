@@ -105,6 +105,33 @@ HomeBoard koppelt externe agenda's (zoals Google Agenda, Apple iCloud of Outlook
 
 ---
 
+## 🏡 HomeBoard als Home Assistant Add-on & Koppeling
+
+HomeBoard werkt zowel zelfstandig in Docker als volledig geïntegreerd **binnen Home Assistant (met zijbalk / Ingress)**:
+
+- **Automatische Supervisor-koppeling**: Als Add-on praat HomeBoard direct met Home Assistant zonder dat je een token hoeft aan te maken. Draait HomeBoard apart in Docker? Dan kun je eenmalig je Home Assistant URL + *Long-Lived Access Token* invullen bij **Instellingen → Home Assistant Koppeling**.
+- **Home Assistant Kalenders (`calendar.*`)**: Ga naar **Kalender → Koppelingen → Home Assistant** om Home Assistant kalenders (zoals Lokale Kalender, CalDAV of Schoolvakanties) toe te voegen met eigen kleur en gezinslid-koppeling.
+- **Home Assistant To-Do Lijsten (`todo.*`)**: Ga naar **Takenlijsten → Home Assistant To-Do → + Lijst koppelen** voor live 2-richtingsverkeer (afvinken, toevoegen, bewerken en verwijderen wordt direct gesynchroniseerd met Home Assistant).
+- **Dagelijkse Afspraken & Automaties (met Vakantie-pauze)**:
+  - Maak bij **Instellingen → Dagelijkse Afspraken & Home Assistant Automaties** vaste regels (bijv. `08:00` — *"Klaarmaken voor school"* op Ma–Vr).
+  - Kies een Home Assistant `automation.*`, `script.*`, `scene.*` of schakelaar die automatisch gestart wordt (bovendien stuurt HomeBoard altijd het event `homeboard_daily_trigger`).
+  - Koppel een **vakantie-agenda** (lokaal, iCal of Home Assistant): staat er op een dag een afspraak in die agenda, dan slaat HomeBoard die dag de automatie automatisch over én verbergt het tijdblok!
+
+### Installeren in Home Assistant (2 manieren)
+
+#### Manier 1: Via GitHub Repository + GHCR Image (Aanbevolen)
+1. Push deze repository naar je eigen GitHub-account; GitHub Actions bouwt automatisch `ghcr.io/<jouw-gebruikersnaam>/<jouw-repo>:latest` (zet het package eenmalig op **Public**).
+2. Haal in `homeboard/config.yaml` het `#` weg voor `# image: "ghcr.io/<jouw-gebruikersnaam>/<jouw-repo>"` en vul jouw eigen gebruikersnaam/reponaam in (in kleine letters).
+3. Ga in Home Assistant naar **Instellingen → Add-ons → Add-on Store → 3 puntjes rechtsboven → Repositories**, plak jouw GitHub URL en klik op **Toevoegen**.
+4. Zoek **HomeBoard**, klik op **Installeren**, zet **Tonen in zijbalk** aan en start de add-on!
+
+#### Manier 2: Als Lokale Add-on in Home Assistant
+1. Kopieer de volledige projectmap naar `/addons/homeboard` op je Home Assistant server (bijv. via Samba of SSH).
+2. Ga naar **Instellingen → Add-ons → Add-on Store → 3 puntjes → Op updates controleren**.
+3. Installeer **HomeBoard** onder *Lokale add-ons* en klik op **Starten**.
+
+---
+
 ## 📱 Handige Kioskmodus voor Wandtablets (iPad / Android / Raspberry Pi)
 
 1. **iPad / iOS**: Open HomeBoard in Safari -> **Deel-icoon** -> **Zet op beginscherm**.
