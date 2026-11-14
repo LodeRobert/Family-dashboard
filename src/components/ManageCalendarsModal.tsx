@@ -312,7 +312,7 @@ export const ManageCalendarsModal: React.FC<ManageCalendarsModalProps> = ({
   const handleAddIcal = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!icalUrl.trim()) {
-      setIcalError('Vul een geldige iCal URL in.');
+      setIcalError('Vul een agenda-URL (openbaar of geheim) of een Google Agenda-ID in.');
       return;
     }
 
@@ -328,25 +328,34 @@ export const ManageCalendarsModal: React.FC<ManageCalendarsModalProps> = ({
         )
       );
 
-      if (!testRes.ok) {
-        throw new Error('De server kon de iCal URL niet bereiken. Controleer of de link klopt.');
+      const data = await testRes.json().catch(() => ({}));
+      if (!testRes.ok || data.error) {
+        throw new Error(
+          data.error || 'De server kon deze agenda-URL of ID niet ophalen. Controleer of het adres klopt.'
+        );
       }
 
-      const data = await testRes.json();
-      if (data.error) {
-        throw new Error(data.error);
-      }
+      const sourceLabel =
+        data.sourceKind === 'google_id'
+          ? 'Google Agenda-ID'
+          : data.sourceKind === 'google_public_link'
+          ? 'Openbare Google link'
+          : data.sourceKind === 'outlook_public_link'
+          ? 'Openbare Outlook link'
+          : data.sourceKind === 'webpage'
+          ? 'Webpagina agenda-feed'
+          : 'iCal feed';
 
       const newCal: CalendarSource = {
         id: 'ical-' + Math.random().toString(36).substring(2, 9),
-        name: icalName.trim() || 'iCal Agenda',
+        name: icalName.trim() || 'Externe Agenda',
         icon: icalIcon || guessCalendarIcon(icalName),
         color: icalColor,
         category: icalCategory !== 'general' ? icalCategory : undefined,
         type: 'ical',
         visible: true,
-        url: cleanUrl,
-        description: `iCal feed (${data.count || 0} afspraken gesynchroniseerd)`,
+        url: data.resolvedUrl || cleanUrl,
+        description: `${sourceLabel} (${data.count || 0} afspraken gesynchroniseerd)`,
         assignmentMode: icalAssignmentMode,
         memberIds: icalAssignmentMode === 'members' ? icalMemberIds : [],
         multiDayMode: icalMultiDayMode
@@ -358,7 +367,7 @@ export const ManageCalendarsModal: React.FC<ManageCalendarsModalProps> = ({
       setIcalAssignmentMode('family');
       setIcalMemberIds([]);
       setIcalMultiDayMode('smart_cutoff');
-      setIcalSuccess(`Agenda succesvol gekoppeld! (${data.count || 0} afspraken geladen)`);
+      setIcalSuccess(`Agenda succesvol gekoppeld via ${sourceLabel}! (${data.count || 0} afspraken geladen)`);
     } catch (err: any) {
       setIcalError(err.message || 'Fout bij het ophalen van de agenda.');
     } finally {
@@ -461,7 +470,7 @@ export const ManageCalendarsModal: React.FC<ManageCalendarsModalProps> = ({
       if (bindingMode === 'ical') {
         const cleanUrl = bindingIcalUrl.trim();
         if (!cleanUrl) {
-          setBindingError('Vul een geldige iCal (.ics) URL in.');
+          setBindingError('Vul een iCal URL, openbare link of Google Agenda-ID in.');
           return;
         }
         const testRes = await fetch(
@@ -469,20 +478,21 @@ export const ManageCalendarsModal: React.FC<ManageCalendarsModalProps> = ({
             `/api/ical/fetch?url=${encodeURIComponent(cleanUrl)}&calendarName=${encodeURIComponent(preset.name)}&calendarColor=${encodeURIComponent(preset.color)}`
           )
         );
-        if (!testRes.ok) {
-          throw new Error('De server kon de iCal URL niet bereiken. Controleer of de link klopt.');
+        const data = await testRes.json().catch(() => ({}));
+        if (!testRes.ok || data.error) {
+          throw new Error(
+            data.error || 'De server kon deze agenda-URL of ID niet bereiken. Controleer of de link of ID klopt.'
+          );
         }
-        const data = await testRes.json();
-        if (data.error) throw new Error(data.error);
 
         const newCal = createCalendarFromPreset(preset, familyMembers, {
           type: 'ical',
-          url: cleanUrl,
+          url: data.resolvedUrl || cleanUrl,
           name: preset.name
         });
         await onAddCalendar(newCal);
         setLocalSuccess(
-          `"${preset.icon} ${preset.name}" gekoppeld via iCal (${data.count || 0} afspraken geladen)!`
+          `"${preset.icon} ${preset.name}" gekoppeld (${data.count || 0} afspraken geladen)!`
         );
         setBindingIcalUrl('');
         setBindingPresetKey(null);
@@ -577,7 +587,7 @@ export const ManageCalendarsModal: React.FC<ManageCalendarsModalProps> = ({
                 Agenda's, Basis-agenda's & Home Assistant
               </h3>
               <p className="text-[11px] text-slate-500">
-                Koppel meerdere Home Assistant kalenders, iCal-feeds of voeg basis-agenda's toe
+                Koppel Home Assistant kalenders, openbare URL&apos;s, iCal-feeds of Google Agenda-ID&apos;s
               </p>
             </div>
           </div>
@@ -639,7 +649,7 @@ export const ManageCalendarsModal: React.FC<ManageCalendarsModalProps> = ({
             }`}
           >
             <Link className="w-3.5 h-3.5" />
-            <span>iCal Feed</span>
+            <span>URL / Agenda-ID</span>
           </button>
 
           <button
@@ -1042,7 +1052,7 @@ export const ManageCalendarsModal: React.FC<ManageCalendarsModalProps> = ({
                                     : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300'
                                 }`}
                               >
-                                🔗 iCal URL (.ics)
+                                🔗 URL / Agenda-ID
                               </button>
                               <button
                                 type="button"
@@ -1073,7 +1083,7 @@ export const ManageCalendarsModal: React.FC<ManageCalendarsModalProps> = ({
                               <div className="space-y-2">
                                 {!haStatus?.connected ? (
                                   <div className="text-[11px] text-amber-800 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/30 p-2.5 rounded-lg border border-amber-200 dark:border-amber-800">
-                                    Home Assistant is nog niet verbonden. Koppel eerst je URL &amp; token bij <strong>Instellingen → Home Assistant Koppeling</strong>, of kies <strong>iCal URL</strong>.
+                                    Home Assistant is nog niet verbonden. Koppel eerst je URL &amp; token bij <strong>Instellingen → Home Assistant Koppeling</strong>, of kies <strong>URL / Agenda-ID</strong>.
                                   </div>
                                 ) : haCalendars.length === 0 ? (
                                   <div className="text-[11px] text-slate-500">
@@ -1096,14 +1106,17 @@ export const ManageCalendarsModal: React.FC<ManageCalendarsModalProps> = ({
                             )}
 
                             {bindingMode === 'ical' && (
-                              <div>
+                              <div className="space-y-1">
                                 <input
-                                  type="url"
+                                  type="text"
                                   value={bindingIcalUrl}
                                   onChange={e => setBindingIcalUrl(e.target.value)}
-                                  placeholder="https://.../calendar.ics (plak hier je Google / RecycleApp / school iCal URL)"
+                                  placeholder="Plak openbare/geheime URL (.ics, Google embed/share, Outlook .html) of Google Agenda-ID"
                                   className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono text-[11px]"
                                 />
+                                <p className="text-[10px] text-slate-500">
+                                  Bijv. <code className="font-mono">nl.be#holiday@group.v.calendar.google.com</code>, <code className="font-mono">webcal://...</code> of een openbare <code className="font-mono">https://...</code> agendalinks.
+                                </p>
                               </div>
                             )}
 
@@ -1237,17 +1250,17 @@ export const ManageCalendarsModal: React.FC<ManageCalendarsModalProps> = ({
             </div>
           )}
 
-          {/* TAB 3: ICAL CONNECTOR */}
+          {/* TAB 3: PUBLIC URL / ICAL / CALENDAR ID CONNECTOR */}
           {activeTab === 'ical' && (
             <div className="space-y-4">
               <div className="p-3.5 rounded-xl bg-indigo-50/80 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800/60 flex items-start gap-3">
                 <Sparkles className="w-5 h-5 text-indigo-600 dark:text-indigo-400 shrink-0 mt-0.5" />
                 <div className="space-y-1">
                   <div className="font-bold text-slate-900 dark:text-white text-xs">
-                    Google Agenda / Apple / Afvalkalender koppelen via iCal
+                    Openbare agenda-URL, Google Agenda-ID of geheime iCal koppelen
                   </div>
                   <p className="text-slate-600 dark:text-slate-300 text-[11px] leading-relaxed">
-                    Werkt betrouwbaar op elk thuisnetwerk. Plak het iCal-adres (.ics) van bijvoorbeeld je persoonlijke agenda of vuilbakkenophaling.
+                    Geen geheime iCal-link bij de hand? Je kunt ook gewoon een <strong>openbare agenda-URL</strong> (Google, Outlook, school-website, <code className="font-mono">webcal://</code>) of een losse <strong>Google Agenda-ID</strong> invullen. HomeBoard zoekt automatisch de juiste agendafeed op.
                   </p>
                 </div>
               </div>
@@ -1278,16 +1291,16 @@ export const ManageCalendarsModal: React.FC<ManageCalendarsModalProps> = ({
                     type="text"
                     value={icalName}
                     onChange={e => setIcalName(e.target.value)}
-                    placeholder="bijv. Vuilbakkenophaling, Google Privé, Werk"
+                    placeholder="bijv. Vuilbakkenophaling, Sportclub, Schoolvakanties"
                     className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
                     required
                   />
                 </div>
 
-                <div>
-                  <div className="flex items-center justify-between mb-1">
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
                     <label className="font-semibold text-slate-700 dark:text-slate-300">
-                      Geheime iCal URL (.ics)
+                      Agenda-URL (openbaar of geheim) of Agenda-ID *
                     </label>
                     <button
                       type="button"
@@ -1298,13 +1311,20 @@ export const ManageCalendarsModal: React.FC<ManageCalendarsModalProps> = ({
                     </button>
                   </div>
                   <input
-                    type="url"
+                    type="text"
                     value={icalUrl}
                     onChange={e => setIcalUrl(e.target.value)}
-                    placeholder="https://calendar.google.com/calendar/ical/.../basic.ics"
+                    placeholder="https://... , webcal://... of naam@group.calendar.google.com"
                     className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white font-mono text-[11px]"
                     required
                   />
+                  <div className="flex flex-wrap gap-1.5 pt-0.5 text-[10px] text-slate-500 dark:text-slate-400">
+                    <span className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 font-mono">.ics feed</span>
+                    <span className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 font-mono">webcal://</span>
+                    <span className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 font-mono">Google embed / ?cid=</span>
+                    <span className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 font-mono">Agenda-ID (...google.com)</span>
+                    <span className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 font-mono">Outlook .html</span>
+                  </div>
                 </div>
 
                 <div>
@@ -1359,21 +1379,38 @@ export const ManageCalendarsModal: React.FC<ManageCalendarsModalProps> = ({
                     disabled={isTestingIcal}
                     className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-semibold rounded-lg shadow-xs transition-colors shrink-0"
                   >
-                    {isTestingIcal ? 'Bezig met ophalen...' : 'iCal Agenda Koppelen'}
+                    {isTestingIcal ? 'Bezig met ophalen...' : 'Agenda Koppelen'}
                   </button>
                 </div>
               </form>
 
-              <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 space-y-2 text-[11px] text-slate-600 dark:text-slate-400">
+              <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 space-y-2.5 text-[11px] text-slate-600 dark:text-slate-400">
                 <div className="font-bold text-slate-900 dark:text-white text-xs flex items-center gap-1.5">
                   <Info className="w-3.5 h-3.5 text-indigo-500" />
-                  <span>Geheime iCal-link vinden in Google Agenda:</span>
+                  <span>Hoe vind je een openbare URL of Agenda-ID?</span>
                 </div>
-                <ol className="list-decimal list-inside space-y-1 pl-1">
-                  <li>Ga op je computer naar <strong>calendar.google.com</strong>.</li>
-                  <li>Klik links naast je agenda op de <strong>3 puntjes</strong> → <strong>Instellingen en delen</strong>.</li>
-                  <li>Scroll naar <strong>Agenda integreren</strong> en kopieer het <strong>Geheim adres in iCal-indeling</strong>.</li>
-                </ol>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <div className="font-semibold text-slate-800 dark:text-slate-200">
+                      Optie A: Openbare URL of Agenda-ID
+                    </div>
+                    <ol className="list-decimal list-inside space-y-0.5">
+                      <li>Open de agenda-instellingen (bijv. Google Agenda → <strong>Instellingen en delen</strong>).</li>
+                      <li>Zet bij openbare agenda&apos;s (zoals sportclub of vakantie) eventueel <strong>Openbaar beschikbaar maken</strong> aan.</li>
+                      <li>Kopieer de <strong>Agenda-ID</strong> (bijv. <code className="font-mono">...group.calendar.google.com</code>) of de gewone <strong>Openbare URL</strong> en plak die hierboven.</li>
+                    </ol>
+                  </div>
+                  <div className="space-y-1">
+                    <div className="font-semibold text-slate-800 dark:text-slate-200">
+                      Optie B: Geheime iCal-link (privé-agenda)
+                    </div>
+                    <ol className="list-decimal list-inside space-y-0.5">
+                      <li>Voor privé-agenda&apos;s die niet openbaar mogen staan.</li>
+                      <li>Scroll naar <strong>Agenda integreren</strong> en kopieer het <strong>Geheim adres in iCal-indeling</strong> (<code className="font-mono">.ics</code>).</li>
+                      <li>Plak deze link hierboven — HomeBoard synchroniseert automatisch.</li>
+                    </ol>
+                  </div>
+                </div>
               </div>
             </div>
           )}

@@ -410,6 +410,48 @@ export default function App() {
     refreshExternalCalendars(calendars);
   };
 
+  const handleSaveSettingsBundle = async (patch: {
+    settings?: Partial<AppSettings>;
+    familyMembers?: FamilyMember[];
+    calendars?: CalendarSource[];
+  }) => {
+    await updateStateAndPersist(prev => {
+      const next: AppState = { ...prev };
+      if (patch.settings) {
+        next.settings = {
+          ...prev.settings,
+          ...patch.settings
+        };
+      }
+      if (patch.familyMembers) {
+        const validMemberIds = new Set(patch.familyMembers.map(m => m.id));
+        next.familyMembers = patch.familyMembers;
+        next.chores = next.chores.filter(c => validMemberIds.has(c.memberId));
+        next.starLogs = next.starLogs.filter(l => validMemberIds.has(l.memberId));
+        next.calendars = (patch.calendars || next.calendars).map(cal => {
+          if (!Array.isArray(cal.memberIds) || cal.memberIds.length === 0) return cal;
+          const remainingIds = cal.memberIds.filter(id => validMemberIds.has(id));
+          return {
+            ...cal,
+            memberIds: remainingIds,
+            assignmentMode: remainingIds.length > 0 ? cal.assignmentMode || 'members' : 'family'
+          };
+        });
+      } else if (patch.calendars) {
+        next.calendars = patch.calendars;
+      }
+
+      if (patch.calendars) {
+        const validCalIds = new Set(next.calendars.map(c => c.id));
+        next.events = next.events.filter(e => validCalIds.has(e.calendarId));
+      }
+      return next;
+    });
+    if (patch.calendars) {
+      refreshExternalCalendars(patch.calendars);
+    }
+  };
+
   const handleUpdateCalendar = (calendarId: string, patch: Partial<CalendarSource>) => {
     updateStateAndPersist(prev => ({
       ...prev,
@@ -1026,6 +1068,7 @@ export default function App() {
               allEvents={baseEvents}
               onUpdateSettings={handleUpdateSettings}
               onUpdateFamilyMembers={handleUpdateFamilyMembers}
+              onSaveSettingsBundle={handleSaveSettingsBundle}
               onAddFamilyMember={handleAddFamilyMember}
               onAdjustMemberStars={handleAdjustMemberStars}
               onUpdateStarLog={handleUpdateStarLog}

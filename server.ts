@@ -777,41 +777,208 @@ function parseICS(icsText: string, calendarId: string, calendarName: string, cal
   return events;
 }
 
-// Proxy endpoint to fetch iCal feed (bypasses browser CORS)
+function decodeBase64Safe(b64: string): string {
+  try {
+    const normalized = b64.replace(/-/g, '+').replace(/_/g, '/');
+    const pad = normalized.length % 4;
+    const padded = pad ? normalized + '='.repeat(4 - pad) : normalized;
+    return Buffer.from(padded, 'base64').toString('utf8').trim();
+  } catch {
+    return '';
+  }
+}
+
+export function resolveCalendarInputToUrl(rawInput: string): {
+  fetchUrl: string;
+  sourceKind: 'ics_url' | 'google_id' | 'google_public_link' | 'outlook_public_link' | 'webpage';
+} {
+  const trimmed = String(rawInput || '').trim();
+  if (!trimmed) {
+    throw new Error('Vul een agenda-URL of agenda-ID in.');
+  }
+
+  // 1. Bare Google Calendar ID (e.g. "nl.be#holiday@group.v.calendar.google.com", "abc@group.calendar.google.com", "name@gmail.com")
+  if (
+    !/^https?:\/\//i.test(trimmed) &&
+    !/^webcal:\/\//i.test(trimmed) &&
+    !/\s/.test(trimmed) &&
+    trimmed.includes('@') &&
+    !trimmed.includes('/')
+  ) {
+    return {
+      fetchUrl: `https://calendar.google.com/calendar/ical/${encodeURIComponent(trimmed)}/public/basic.ics`,
+      sourceKind: 'google_id'
+    };
+  }
+
+  // Normalize scheme
+  let normalized = trimmed.replace(/^webcal:\/\//i, 'https://');
+  if (!/^https?:\/\//i.test(normalized)) {
+    normalized = `https://${normalized}`;
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(normalized);
+  } catch {
+    throw new Error(
+      'Ongeldig adres. Vul een volledige URL in (bijv. https://...) of een Google Agenda-ID (bijv. naam@group.calendar.google.com).'
+    );
+  }
+
+  // 2. Google Calendar public / share / embed URLs
+  if (parsed.hostname.includes('calendar.google.com')) {
+    if (parsed.pathname.includes('/calendar/ical/') && parsed.pathname.endsWith('.ics')) {
+      return { fetchUrl: parsed.toString(), sourceKind: 'ics_url' };
+    }
+
+    const srcParam = parsed.searchParams.get('src');
+    if (srcParam) {
+      return {
+        fetchUrl: `https://calendar.google.com/calendar/ical/${encodeURIComponent(srcParam.trim())}/public/basic.ics`,
+        sourceKind: 'google_public_link'
+      };
+    }
+
+    const cidParam = parsed.searchParams.get('cid');
+    if (cidParam) {
+      const decodedCid = decodeBase64Safe(cidParam.trim());
+      const calendarId = decodedCid.includes('@') ? decodedCid : cidParam.trim();
+      return {
+        fetchUrl: `https://calendar.google.com/calendar/ical/${encodeURIComponent(calendarId)}/public/basic.ics`,
+        sourceKind: 'google_public_link'
+      };
+    }
+  }
+
+  // 3. Outlook / Office 365 public HTML calendar URL -> convert to .ics
+  if (
+    (parsed.hostname.includes('outlook.live.com') ||
+      parsed.hostname.includes('outlook.office365.com') ||
+      parsed.hostname.includes('outlook.office.com')) &&
+    /\/calendar\.html$/i.test(parsed.pathname)
+  ) {
+    parsed.pathname = parsed.pathname.replace(/\/calendar\.html$/i, '/calendar.ics');
+    return { fetchUrl: parsed.toString(), sourceKind: 'outlook_public_link' };
+  }
+
+  // 4. Direct .ics or generic web URL
+  if (/\.ics($|\?)/i.test(parsed.pathname + parsed.search)) {
+    return { fetchUrl: parsed.toString(), sourceKind: 'ics_url' };
+  }
+
+  return { fetchUrl: parsed.toString(), sourceKind: 'webpage' };
+}
+
+function discoverIcsFeedFromHtml(html: string, baseUrl: string): string | null {
+  const candidates: string[] = [];
+
+  // <link rel="alternate" type="text/calendar" href="...">
+  const linkCalendarRegex = /<link[^>]+type=["']text\/calendar["'][^>]+href=["']([^"']+)["']/gi;
+  let m: RegExpExecArray | null;
+  while ((m = linkCalendarRegex.exec(html)) !== null) {
+    if (m[1]) candidates.push(m[1]);
+  }
+  const linkCalendarRegexRev = /<link[^>]+href=["']([^"']+)["'][^>]+type=["']text\/calendar["']/gi;
+  while ((m = linkCalendarRegexRev.exec(html)) !== null) {
+    if (m[1]) candidates.push(m[1]);
+  }
+
+  // Direct webcal:// or .ics links anywhere in href
+  const hrefRegex = /href=["']((?:webcal:\/\/|https?:\/\/|\/|\.\.?\/)[^"']+\.ics(?:\?[^"']*)?|webcal:\/\/[^"']+)["']/gi;
+  while ((m = hrefRegex.exec(html)) !== null) {
+    if (m[1]) candidates.push(m[1]);
+  }
+
+  for (const rawCandidate of candidates) {
+    const cleaned = rawCandidate.trim().replace(/&amp;/g, '&').replace(/^webcal:\/\//i, 'https://');
+    try {
+      const resolved = new URL(cleaned, baseUrl).toString();
+      if (/^https?:\/\//i.test(resolved)) {
+        return resolved;
+      }
+    } catch {
+      // ignore invalid URL candidate
+    }
+  }
+  return null;
+}
+
+// Proxy endpoint to fetch iCal feed, public calendar URL, or Google Calendar ID
 app.get('/api/ical/fetch', async (req: Request, res: Response) => {
-  const url = req.query.url as string;
+  const rawInput = req.query.url as string;
   const calendarId = (req.query.calendarId as string) || 'ical-default';
-  const calendarName = (req.query.calendarName as string) || 'iCal Agenda';
+  const calendarName = (req.query.calendarName as string) || 'Agenda';
   const calendarColor = (req.query.calendarColor as string) || '#3B82F6';
 
-  if (!url) {
-    return res.status(400).json({ error: 'URL parameter ontbreekt' });
+  if (!rawInput) {
+    return res.status(400).json({ error: 'URL of agenda-ID ontbreekt' });
   }
 
   try {
-    const normalizedUrl = url.replace(/^webcal:\/\//i, 'https://');
-    const response = await fetch(normalizedUrl, {
+    const resolved = resolveCalendarInputToUrl(rawInput);
+    let activeUrl = resolved.fetchUrl;
+
+    let response = await fetch(activeUrl, {
       headers: {
-        'User-Agent': 'HomeBoard-Family-Dashboard/1.0 (+https://home-board.local)'
+        'User-Agent': 'HomeBoard-Family-Dashboard/1.0 (+https://home-board.local)',
+        Accept: 'text/calendar, text/plain, text/html, */*'
       }
     });
 
     if (!response.ok) {
-      throw new Error(`iCal server reageerde met status ${response.status}`);
+      if (
+        (resolved.sourceKind === 'google_id' || resolved.sourceKind === 'google_public_link') &&
+        (response.status === 404 || response.status === 403)
+      ) {
+        throw new Error(
+          'Deze Google Agenda is niet openbaar toegankelijk (status ' +
+            response.status +
+            '). Zet de agenda in Google Agenda op "Openbaar beschikbaar maken", of gebruik het "Geheim adres in iCal-indeling".'
+        );
+      }
+      throw new Error(`Agendaserver reageerde met status ${response.status}`);
     }
 
-    const icsText = await response.text();
-    const events = parseICS(icsText, calendarId, calendarName, calendarColor);
+    let bodyText = await response.text();
+
+    // If the URL returned an HTML webpage instead of an ICS feed, try discovering embedded .ics / webcal feed links
+    if (!bodyText.includes('BEGIN:VCALENDAR')) {
+      const discoveredUrl = discoverIcsFeedFromHtml(bodyText, activeUrl);
+      if (discoveredUrl) {
+        activeUrl = discoveredUrl;
+        response = await fetch(activeUrl, {
+          headers: {
+            'User-Agent': 'HomeBoard-Family-Dashboard/1.0 (+https://home-board.local)',
+            Accept: 'text/calendar, text/plain, */*'
+          }
+        });
+        if (!response.ok) {
+          throw new Error(`Ontdekte agendafeed (${activeUrl}) reageerde met status ${response.status}`);
+        }
+        bodyText = await response.text();
+      }
+    }
+
+    if (!bodyText.includes('BEGIN:VCALENDAR')) {
+      throw new Error(
+        'Geen geldige iCal-gegevens gevonden op dit adres. Controleer of de agenda openbaar is, of plak een directe .ics / Google Agenda-ID.'
+      );
+    }
+
+    const events = parseICS(bodyText, calendarId, calendarName, calendarColor);
 
     res.json({
       success: true,
+      resolvedUrl: activeUrl,
+      sourceKind: resolved.sourceKind,
       count: events.length,
       events
     });
   } catch (error: any) {
-    console.error('Error fetching iCal feed:', error);
+    console.error('Error fetching calendar feed:', error);
     res.status(500).json({
-      error: 'Kan iCal agenda niet ophalen: ' + error.message
+      error: error.message || 'Kan agenda niet ophalen.'
     });
   }
 });

@@ -36,6 +36,8 @@ interface HomeAssistantSettingsSectionProps {
   allEvents: CalendarEvent[];
   rules: DailyAutomationRule[];
   initialHaUrl?: string;
+  sectionFilter?: 'all' | 'connection' | 'automations';
+  embedded?: boolean;
   onAddRule: (rule: Omit<DailyAutomationRule, 'id'>) => void;
   onUpdateRule: (ruleId: string, patch: Partial<DailyAutomationRule>) => void;
   onDeleteRule: (ruleId: string) => void;
@@ -57,6 +59,8 @@ export const HomeAssistantSettingsSection: React.FC<HomeAssistantSettingsSection
   allEvents,
   rules,
   initialHaUrl = '',
+  sectionFilter = 'all',
+  embedded = false,
   onAddRule,
   onUpdateRule,
   onDeleteRule,
@@ -297,10 +301,22 @@ export const HomeAssistantSettingsSection: React.FC<HomeAssistantSettingsSection
   const todayStr = getLocalDateStr();
   const nonRuleEvents = allEvents.filter(e => !e.isDailyRule);
 
+  const showConnection = sectionFilter === 'all' || sectionFilter === 'connection';
+  const showAutomations = sectionFilter === 'all' || sectionFilter === 'automations';
+
+  const cardClass = embedded
+    ? 'space-y-4'
+    : 'bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 sm:p-6 shadow-xs space-y-4';
+
+  const autoCardClass = embedded
+    ? 'space-y-5'
+    : 'bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 sm:p-6 shadow-xs space-y-5';
+
   return (
-    <div className="space-y-6">
+    <div className={embedded ? '' : 'space-y-6'}>
       {/* SECTION A: Home Assistant Verbinding */}
-      <section className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 sm:p-6 shadow-xs space-y-4">
+      {showConnection && (
+      <section className={cardClass}>
         <div className="flex items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-3 flex-wrap">
           <div className="flex items-center gap-2.5">
             <Home className="w-5 h-5 text-sky-600 dark:text-sky-400" />
@@ -437,9 +453,11 @@ export const HomeAssistantSettingsSection: React.FC<HomeAssistantSettingsSection
           </div>
         </form>
       </section>
+      )}
 
       {/* SECTION B: Dagelijkse Afspraken & Home Assistant Automaties */}
-      <section className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 sm:p-6 shadow-xs space-y-5">
+      {showAutomations && (
+      <section className={autoCardClass}>
         <div className="flex items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-3 flex-wrap">
           <div className="flex items-center gap-2.5">
             <BellRing className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
@@ -911,6 +929,7 @@ action:
           </div>
         )}
       </section>
+      )}
     </div>
   );
 };
