@@ -6,6 +6,7 @@ export interface CalendarSource {
   id: string;
   name: string;
   color: string;
+  icon?: string;
   type: CalendarType;
   visible: boolean;
   description?: string;
@@ -152,6 +153,14 @@ export interface RewardItem {
   claimedCount: number;
 }
 
+export interface ClothingAdviceRule {
+  id: string;
+  label: string;
+  maxTemp: number;
+  advice: string;
+  items: string[];
+}
+
 export interface AppSettings {
   dashboardName: string;
   showFamilyNameInGreeting: boolean;
@@ -162,6 +171,19 @@ export interface AppSettings {
   weatherTemp: number;
   weatherCondition: string;
   weatherCode?: number;
+  weatherTempMin?: number;
+  weatherTempMax?: number;
+  weatherPrecipitationProb?: number;
+  weatherWindMax?: number;
+  weatherDailyCode?: number;
+  weatherDailyCondition?: string;
+  showClothingAdvice?: boolean;
+  clothingRules?: ClothingAdviceRule[];
+  clothingRainThreshold?: number;
+  clothingRainAdvice?: string;
+  clothingWindThreshold?: number;
+  clothingWindAdvice?: string;
+  clothingCustomNote?: string;
   hasSettingsPassword?: boolean;
   haUrl?: string;
   hasHaToken?: boolean;

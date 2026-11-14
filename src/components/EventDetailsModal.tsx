@@ -65,7 +65,8 @@ export const EventDetailsModal: React.FC<EventDetailsModalProps> = ({
   if (!event) return null;
 
   const calColor = calendar?.color || event.calendarColor || '#6366F1';
-  const calName = calendar?.name || event.calendarName || 'Agenda';
+  const baseCalName = calendar?.name || event.calendarName || 'Agenda';
+  const calName = calendar?.icon ? `${calendar.icon} ${baseCalName}` : baseCalName;
   const assignees = resolveEventAssignees(event, calendar, familyMembers);
   const isReadOnly = Boolean(
     event.isExternal ||

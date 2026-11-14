@@ -161,7 +161,13 @@ export default function App() {
             ...prev.settings,
             weatherTemp: weather.temp,
             weatherCondition: weather.condition,
-            weatherCode: weather.weatherCode
+            weatherCode: weather.weatherCode,
+            weatherTempMin: weather.tempMin,
+            weatherTempMax: weather.tempMax,
+            weatherPrecipitationProb: weather.precipitationProb,
+            weatherWindMax: weather.windSpeedMax,
+            weatherDailyCode: weather.dailyWeatherCode,
+            weatherDailyCondition: weather.dailyCondition
           }
         }));
       } catch {
@@ -476,12 +482,31 @@ export default function App() {
 
   // Calendar Management Handlers
   const handleAddCalendar = async (cal: CalendarSource) => {
-    await updateStateAndPersist(prev => ({
-      ...prev,
-      calendars: [...prev.calendars, cal]
-    }));
-    if (appState) {
-      refreshExternalCalendars([...appState.calendars, cal]);
+    let nextCalendars: CalendarSource[] = [];
+    await updateStateAndPersist(prev => {
+      nextCalendars = [...prev.calendars, cal];
+      return {
+        ...prev,
+        calendars: nextCalendars
+      };
+    });
+    if (nextCalendars.length > 0) {
+      refreshExternalCalendars(nextCalendars);
+    }
+  };
+
+  const handleAddCalendarsBatch = async (newCals: CalendarSource[]) => {
+    if (newCals.length === 0) return;
+    let nextCalendars: CalendarSource[] = [];
+    await updateStateAndPersist(prev => {
+      nextCalendars = [...prev.calendars, ...newCals];
+      return {
+        ...prev,
+        calendars: nextCalendars
+      };
+    });
+    if (nextCalendars.length > 0) {
+      await refreshExternalCalendars(nextCalendars);
     }
   };
 
@@ -611,6 +636,20 @@ export default function App() {
     await updateStateAndPersist(prev => ({
       ...prev,
       rewards: [...prev.rewards, reward]
+    }));
+  };
+
+  const handleUpdateReward = async (rewardId: string, patch: Partial<RewardItem>) => {
+    await updateStateAndPersist(prev => ({
+      ...prev,
+      rewards: prev.rewards.map(r => (r.id === rewardId ? { ...r, ...patch } : r))
+    }));
+  };
+
+  const handleDeleteReward = async (rewardId: string) => {
+    await updateStateAndPersist(prev => ({
+      ...prev,
+      rewards: prev.rewards.filter(r => r.id !== rewardId)
     }));
   };
 
@@ -982,6 +1021,9 @@ export default function App() {
               onAddChore={handleAddChore}
               onUpdateChore={handleUpdateChore}
               onDeleteChore={handleDeleteChore}
+              onAddReward={handleAddReward}
+              onUpdateReward={handleUpdateReward}
+              onDeleteReward={handleDeleteReward}
               onUpdateCalendars={handleUpdateCalendars}
               onOpenManageCalendars={() => setIsManageCalendarsOpen(true)}
               onAddDailyRule={handleAddDailyRule}
@@ -1041,6 +1083,7 @@ export default function App() {
         calendars={appState.calendars}
         familyMembers={appState.familyMembers}
         onAddCalendar={handleAddCalendar}
+        onAddCalendarsBatch={handleAddCalendarsBatch}
         onUpdateCalendar={handleUpdateCalendar}
         onDeleteCalendar={handleDeleteCalendar}
         onToggleVisibility={handleToggleCalendarVisibility}

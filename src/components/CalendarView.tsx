@@ -374,6 +374,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                     className="w-2.5 h-2.5 rounded-full shrink-0"
                     style={{ backgroundColor: cal.color }}
                   />
+                  {cal.icon && <span className="text-xs leading-none">{cal.icon}</span>}
                   <span>{cal.name}</span>
                   <span className="text-slate-300 dark:text-slate-600">|</span>
                   <CalendarAssigneeBadge assignees={assignees} compact />
@@ -717,7 +718,8 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                                     <span className="font-semibold truncate">{assignees.label}</span>
                                     {cal?.name && heightPx >= 70 && (
                                       <span className="text-slate-500 dark:text-slate-400 truncate">
-                                        · {cal.name}
+                                        · {cal.icon ? `${cal.icon} ` : ''}
+                                        {cal.name}
                                       </span>
                                     )}
                                   </div>
@@ -822,7 +824,10 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                         <div className="text-xs font-mono font-bold text-indigo-600 dark:text-indigo-400">
                           {timeFormatted}
                         </div>
-                        <div className="text-[11px] text-slate-400">{liveCalName}</div>
+                        <div className="text-[11px] text-slate-400">
+                          {calSource?.icon ? `${calSource.icon} ` : ''}
+                          {liveCalName}
+                        </div>
                       </div>
                     </div>
                   );
@@ -930,7 +935,9 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                     : formatEventTimeDisplay(evt, startDateStr, timeFormat24h);
 
                   const liveColor = calSource?.color || evt.calendarColor || '#6366F1';
-                  const liveCalName = calSource?.name || evt.calendarName || 'Agenda';
+                  const liveCalName = calSource?.icon
+                    ? `${calSource.icon} ${calSource.name || evt.calendarName || 'Agenda'}`
+                    : calSource?.name || evt.calendarName || 'Agenda';
                   const assignees = resolveEventAssignees(evt, calSource, familyMembers);
 
                   return (

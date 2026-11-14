@@ -8,8 +8,10 @@ import {
   CalendarSource,
   Chore,
   ChorePeriod,
+  ClothingAdviceRule,
   DailyAutomationRule,
   FamilyMember,
+  RewardItem,
   WeatherLocationResult
 } from '../types';
 import { MemberAvatar } from './MemberAvatar';
@@ -18,6 +20,19 @@ import { CalendarAssignmentControls } from './CalendarAssignmentControls';
 import { CalendarAssigneeBadge } from './CalendarAssigneeBadge';
 import { HomeAssistantSettingsSection } from './HomeAssistantSettingsSection';
 import { getCalendarAssignees } from '../utils/calendarHelpers';
+import {
+  CALENDAR_ICONS,
+  CALENDAR_PRESETS,
+  CalendarPreset,
+  createCalendarFromPreset
+} from '../utils/calendarPresets';
+import {
+  DEFAULT_CLOTHING_RAIN_ADVICE,
+  DEFAULT_CLOTHING_RAIN_THRESHOLD,
+  DEFAULT_CLOTHING_RULES,
+  DEFAULT_CLOTHING_WIND_ADVICE,
+  DEFAULT_CLOTHING_WIND_THRESHOLD
+} from '../utils/weatherClothing';
 import {
   searchWeatherLocations,
   fetchCurrentWeather,
@@ -55,7 +70,9 @@ import {
   Link,
   Pencil,
   History,
-  RotateCcw
+  RotateCcw,
+  Shirt,
+  Trophy
 } from 'lucide-react';
 
 interface SettingsViewProps {
@@ -71,6 +88,9 @@ interface SettingsViewProps {
   onAddChore: (chore: Omit<Chore, 'id' | 'completedToday'>) => void;
   onUpdateChore: (choreId: string, updates: Partial<Chore>) => void;
   onDeleteChore: (choreId: string) => void;
+  onAddReward: (reward: Omit<RewardItem, 'id' | 'claimedCount'>) => void;
+  onUpdateReward: (rewardId: string, patch: Partial<RewardItem>) => void;
+  onDeleteReward: (rewardId: string) => void;
   onUpdateCalendars: (calendars: CalendarSource[]) => void;
   onOpenManageCalendars: () => void;
   onAddDailyRule: (rule: Omit<DailyAutomationRule, 'id'>) => void;
@@ -97,6 +117,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   onAddChore,
   onUpdateChore,
   onDeleteChore,
+  onAddReward,
+  onUpdateReward,
+  onDeleteReward,
   onUpdateCalendars,
   onOpenManageCalendars,
   onAddDailyRule,
@@ -106,7 +129,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   onLockSettings,
   onRestoreState
 }) => {
-  const { settings, familyMembers, calendars, starLogs, chores } = appState;
+  const { settings, familyMembers, calendars, starLogs, chores, rewards } = appState;
 
   // Weather search state
   const [cityQuery, setCityQuery] = useState(settings.cityName || '');
@@ -170,9 +193,22 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [editChoreIcon, setEditChoreIcon] = useState<string>('✨');
   const [confirmDeleteChoreId, setConfirmDeleteChoreId] = useState<string | null>(null);
 
+  // Rewards management state (password-protected)
+  const [newRewardTitle, setNewRewardTitle] = useState('');
+  const [newRewardStars, setNewRewardStars] = useState<string>('10');
+  const [editingRewardId, setEditingRewardId] = useState<string | null>(null);
+  const [editRewardTitle, setEditRewardTitle] = useState('');
+  const [editRewardStars, setEditRewardStars] = useState<string>('10');
+  const [editRewardClaimed, setEditRewardClaimed] = useState<string>('0');
+  const [confirmDeleteRewardId, setConfirmDeleteRewardId] = useState<string | null>(null);
+
+  // Clothing advice rules editor toggle
+  const [showClothingRulesEditor, setShowClothingRulesEditor] = useState(false);
+
   // New local calendar form
   const [isAddingCalendar, setIsAddingCalendar] = useState(false);
   const [newCalName, setNewCalName] = useState('');
+  const [newCalIcon, setNewCalIcon] = useState('📅');
   const [newCalColor, setNewCalColor] = useState('#8B5CF6');
   const [newCalDescription, setNewCalDescription] = useState('');
   const [newCalAssignmentMode, setNewCalAssignmentMode] = useState<CalendarAssignmentMode>('family');
@@ -220,7 +256,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         weatherLon: loc.longitude,
         weatherTemp: weather.temp,
         weatherCondition: weather.condition,
-        weatherCode: weather.weatherCode
+        weatherCode: weather.weatherCode,
+        weatherTempMin: weather.tempMin,
+        weatherTempMax: weather.tempMax,
+        weatherPrecipitationProb: weather.precipitationProb,
+        weatherWindMax: weather.windSpeedMax,
+        weatherDailyCode: weather.dailyWeatherCode,
+        weatherDailyCondition: weather.dailyCondition
       });
       setCityQuery(loc.name);
       setCityResults([]);
@@ -246,7 +288,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       onUpdateSettings({
         weatherTemp: weather.temp,
         weatherCondition: weather.condition,
-        weatherCode: weather.weatherCode
+        weatherCode: weather.weatherCode,
+        weatherTempMin: weather.tempMin,
+        weatherTempMax: weather.tempMax,
+        weatherPrecipitationProb: weather.precipitationProb,
+        weatherWindMax: weather.windSpeedMax,
+        weatherDailyCode: weather.dailyWeatherCode,
+        weatherDailyCondition: weather.dailyCondition
       });
       setWeatherFeedback(`Weer vernieuwd: ${weather.temp}°C (${weather.condition})`);
     } catch {
@@ -450,6 +498,62 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     setEditingChoreId(null);
   };
 
+  // --- Reward handlers ---
+  const handleAddRewardSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newRewardTitle.trim()) return;
+    onAddReward({
+      title: newRewardTitle.trim(),
+      starsRequired: Math.max(1, parseInt(newRewardStars || '10', 10) || 10)
+    });
+    setNewRewardTitle('');
+    setNewRewardStars('10');
+  };
+
+  const startEditingReward = (reward: RewardItem) => {
+    setEditingRewardId(reward.id);
+    setConfirmDeleteRewardId(null);
+    setEditRewardTitle(reward.title);
+    setEditRewardStars(String(reward.starsRequired));
+    setEditRewardClaimed(String(reward.claimedCount || 0));
+  };
+
+  const handleSaveRewardEdit = (rewardId: string) => {
+    if (!editRewardTitle.trim()) return;
+    onUpdateReward(rewardId, {
+      title: editRewardTitle.trim(),
+      starsRequired: Math.max(1, parseInt(editRewardStars || '1', 10) || 1),
+      claimedCount: Math.max(0, parseInt(editRewardClaimed || '0', 10) || 0)
+    });
+    setEditingRewardId(null);
+  };
+
+  // --- Clothing rules helpers ---
+  const activeClothingRules: ClothingAdviceRule[] =
+    Array.isArray(settings.clothingRules) && settings.clothingRules.length > 0
+      ? settings.clothingRules
+      : DEFAULT_CLOTHING_RULES;
+
+  const handleUpdateClothingRule = (
+    ruleId: string,
+    patch: Partial<ClothingAdviceRule>
+  ) => {
+    const next = activeClothingRules.map(r => (r.id === ruleId ? { ...r, ...patch } : r));
+    onUpdateSettings({ clothingRules: next });
+  };
+
+  const handleResetClothingDefaults = () => {
+    onUpdateSettings({
+      showClothingAdvice: true,
+      clothingRules: DEFAULT_CLOTHING_RULES,
+      clothingRainThreshold: DEFAULT_CLOTHING_RAIN_THRESHOLD,
+      clothingRainAdvice: DEFAULT_CLOTHING_RAIN_ADVICE,
+      clothingWindThreshold: DEFAULT_CLOTHING_WIND_THRESHOLD,
+      clothingWindAdvice: DEFAULT_CLOTHING_WIND_ADVICE,
+      clothingCustomNote: ''
+    });
+  };
+
   // --- Calendar handlers ---
   const handleUpdateCalendarField = (calId: string, patch: Partial<CalendarSource>) => {
     onUpdateCalendars(
@@ -464,6 +568,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     const newCal: CalendarSource = {
       id: 'cal-' + Math.random().toString(36).substring(2, 9),
       name: newCalName.trim(),
+      icon: newCalIcon || '📅',
       color: newCalColor,
       type: 'local',
       visible: true,
@@ -475,11 +580,17 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
     onUpdateCalendars([...calendars, newCal]);
     setNewCalName('');
+    setNewCalIcon('📅');
     setNewCalDescription('');
     setNewCalAssignmentMode('family');
     setNewCalMemberIds([]);
     setNewCalMultiDayMode('smart_cutoff');
     setIsAddingCalendar(false);
+  };
+
+  const handleAddPresetCalendar = (preset: CalendarPreset) => {
+    const newCal = createCalendarFromPreset(preset, familyMembers);
+    onUpdateCalendars([...calendars, newCal]);
   };
 
   const handleDeleteCalendar = (calId: string) => {
@@ -729,6 +840,181 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             ))}
           </div>
         )}
+
+        {/* Kids' Clothing Advice Customization */}
+        <div className="pt-4 border-t border-slate-100 dark:border-slate-800 space-y-3 text-xs">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <label className="inline-flex items-center gap-2.5 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={settings.showClothingAdvice !== false}
+                onChange={e => onUpdateSettings({ showClothingAdvice: e.target.checked })}
+                className="w-4 h-4 rounded text-indigo-600"
+              />
+              <Shirt className="w-4 h-4 text-amber-500" />
+              <span className="font-bold text-sm text-slate-900 dark:text-white">
+                Weer & kledingadvies voor de kindjes tonen op het dashboard
+              </span>
+            </label>
+
+            <button
+              type="button"
+              onClick={() => setShowClothingRulesEditor(p => !p)}
+              className="px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 font-semibold text-slate-700 dark:text-slate-200"
+            >
+              {showClothingRulesEditor ? 'Regels verbergen' : 'Kledingregels aanpassen'}
+            </button>
+          </div>
+
+          <div>
+            <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
+              Eigen notitie op het kledingbord vandaag (optioneel, bijv. "Vandaag sportkleren of zwemgerief mee!")
+            </label>
+            <input
+              type="text"
+              value={settings.clothingCustomNote || ''}
+              onChange={e => onUpdateSettings({ clothingCustomNote: e.target.value })}
+              placeholder="bijv. Vergeet de turnzak of kaplaarzen niet!"
+              className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+            />
+          </div>
+
+          {showClothingRulesEditor && (
+            <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/30 space-y-4">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <span className="font-bold text-slate-900 dark:text-white">
+                  Temperatuurzones & kledingsuggesties aanpassen
+                </span>
+                <button
+                  type="button"
+                  onClick={handleResetClothingDefaults}
+                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-[11px] font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100"
+                >
+                  <RotateCcw className="w-3 h-3" />
+                  <span>Standaardadvies herstellen</span>
+                </button>
+              </div>
+
+              <div className="space-y-2.5">
+                {[...activeClothingRules]
+                  .sort((a, b) => a.maxTemp - b.maxTemp)
+                  .map(rule => (
+                    <div
+                      key={rule.id}
+                      className="p-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 grid grid-cols-1 sm:grid-cols-12 gap-2.5 items-end"
+                    >
+                      <div className="sm:col-span-3">
+                        <label className="block font-semibold text-slate-500 mb-1">Zone</label>
+                        <input
+                          type="text"
+                          value={rule.label}
+                          onChange={e => handleUpdateClothingRule(rule.id, { label: e.target.value })}
+                          className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                        />
+                      </div>
+
+                      <div className="sm:col-span-2">
+                        <label className="block font-semibold text-slate-500 mb-1">T/m (°C)</label>
+                        <input
+                          type="number"
+                          value={rule.maxTemp}
+                          onChange={e =>
+                            handleUpdateClothingRule(rule.id, {
+                              maxTemp: parseInt(e.target.value || '20', 10)
+                            })
+                          }
+                          className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-mono text-center"
+                        />
+                      </div>
+
+                      <div className="sm:col-span-3">
+                        <label className="block font-semibold text-slate-500 mb-1">Hoofdadvies</label>
+                        <input
+                          type="text"
+                          value={rule.advice}
+                          onChange={e => handleUpdateClothingRule(rule.id, { advice: e.target.value })}
+                          className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                        />
+                      </div>
+
+                      <div className="sm:col-span-4">
+                        <label className="block font-semibold text-slate-500 mb-1">
+                          Kledingstukken (komma-gescheiden)
+                        </label>
+                        <input
+                          type="text"
+                          value={(rule.items || []).join(', ')}
+                          onChange={e =>
+                            handleUpdateClothingRule(rule.id, {
+                              items: e.target.value
+                                .split(',')
+                                .map(s => s.trim())
+                                .filter(Boolean)
+                            })
+                          }
+                          className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                        />
+                      </div>
+                    </div>
+                  ))}
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-slate-200 dark:border-slate-700">
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <label className="font-semibold text-slate-700 dark:text-slate-300">
+                      Regenwaarschuwing vanaf (% kans)
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      max={100}
+                      value={settings.clothingRainThreshold ?? DEFAULT_CLOTHING_RAIN_THRESHOLD}
+                      onChange={e =>
+                        onUpdateSettings({
+                          clothingRainThreshold: Math.max(0, Math.min(100, Number(e.target.value)))
+                        })
+                      }
+                      className="w-16 px-2 py-1 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono text-center"
+                    />
+                  </div>
+                  <input
+                    type="text"
+                    value={settings.clothingRainAdvice ?? DEFAULT_CLOTHING_RAIN_ADVICE}
+                    onChange={e => onUpdateSettings({ clothingRainAdvice: e.target.value })}
+                    className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <label className="font-semibold text-slate-700 dark:text-slate-300">
+                      Windwaarschuwing vanaf (km/u)
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      max={150}
+                      value={settings.clothingWindThreshold ?? DEFAULT_CLOTHING_WIND_THRESHOLD}
+                      onChange={e =>
+                        onUpdateSettings({
+                          clothingWindThreshold: Math.max(0, Number(e.target.value))
+                        })
+                      }
+                      className="w-16 px-2 py-1 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono text-center"
+                    />
+                  </div>
+                  <input
+                    type="text"
+                    value={settings.clothingWindAdvice ?? DEFAULT_CLOTHING_WIND_ADVICE}
+                    onChange={e => onUpdateSettings({ clothingWindAdvice: e.target.value })}
+                    className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900"
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
       </section>
 
       {/* SECTION 3: Gezin, Profielfoto's & Sterren Beheren */}
@@ -1936,7 +2222,223 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         })()}
       </section>
 
-      {/* SECTION 4: Agenda's, Volledige Kleuren & iCal Feeds */}
+      {/* SECTION 3D: Beloningen Beheren, Sterren Aanpassen & Teller Resetten */}
+      <section className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 sm:p-6 shadow-xs space-y-5">
+        <div className="flex items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-3 flex-wrap">
+          <div className="flex items-center gap-2.5">
+            <Trophy className="w-5 h-5 text-amber-500" />
+            <div>
+              <h2 className="text-base font-bold text-slate-900 dark:text-white">
+                Beloningen Beheren & Teller Resetten (enkel na wachtwoord)
+              </h2>
+              <p className="text-xs text-slate-500">
+                Voeg beloningen toe, pas de benodigde sterren aan, verwijder oude beloningen of reset hoe vaak iets ingewisseld is.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Add new reward form */}
+        <form
+          onSubmit={handleAddRewardSubmit}
+          className="p-4 rounded-xl border border-amber-200/80 dark:border-amber-900/50 bg-amber-50/40 dark:bg-amber-950/15 grid grid-cols-1 sm:grid-cols-12 gap-3 items-end text-xs"
+        >
+          <div className="sm:col-span-6">
+            <label className="block font-semibold text-slate-600 dark:text-slate-400 mb-1">
+              Nieuwe beloning *
+            </label>
+            <input
+              type="text"
+              value={newRewardTitle}
+              onChange={e => setNewRewardTitle(e.target.value)}
+              placeholder="bijv. IJsje gaan eten 🍦, Extra schermtijd"
+              className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800"
+              required
+            />
+          </div>
+
+          <div className="sm:col-span-3">
+            <label className="block font-semibold text-slate-600 dark:text-slate-400 mb-1">
+              Benodigde sterren ★
+            </label>
+            <input
+              type="number"
+              min={1}
+              max={999}
+              value={newRewardStars}
+              onChange={e => setNewRewardStars(e.target.value)}
+              className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 font-mono text-center"
+              required
+            />
+          </div>
+
+          <div className="sm:col-span-3 flex justify-end">
+            <button
+              type="submit"
+              className="w-full sm:w-auto px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white font-semibold rounded-lg transition-colors"
+            >
+              + Beloning toevoegen
+            </button>
+          </div>
+        </form>
+
+        {/* Rewards list with Edit, Reset claimedCount & Delete */}
+        {rewards.length === 0 ? (
+          <div className="py-8 text-center text-xs text-slate-400 border border-dashed border-slate-200 dark:border-slate-800 rounded-xl">
+            Nog geen beloningen aangemaakt.
+          </div>
+        ) : (
+          <div className="border border-slate-200 dark:border-slate-800 rounded-xl divide-y divide-slate-100 dark:divide-slate-800 text-xs">
+            {rewards.map(reward => {
+              const isEditing = editingRewardId === reward.id;
+
+              if (isEditing) {
+                return (
+                  <div
+                    key={reward.id}
+                    className="p-4 bg-amber-50/50 dark:bg-amber-950/20 grid grid-cols-1 sm:grid-cols-12 gap-2.5 items-end"
+                  >
+                    <div className="sm:col-span-5">
+                      <label className="block font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                        Titel beloning
+                      </label>
+                      <input
+                        type="text"
+                        value={editRewardTitle}
+                        onChange={e => setEditRewardTitle(e.target.value)}
+                        className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900"
+                      />
+                    </div>
+
+                    <div className="sm:col-span-2">
+                      <label className="block font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                        Sterren ★
+                      </label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={999}
+                        value={editRewardStars}
+                        onChange={e => setEditRewardStars(e.target.value)}
+                        className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono text-center"
+                      />
+                    </div>
+
+                    <div className="sm:col-span-2">
+                      <label className="block font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                        Aantal x ingewisseld
+                      </label>
+                      <input
+                        type="number"
+                        min={0}
+                        max={9999}
+                        value={editRewardClaimed}
+                        onChange={e => setEditRewardClaimed(e.target.value)}
+                        className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono text-center"
+                      />
+                    </div>
+
+                    <div className="sm:col-span-3 flex items-center justify-end gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => handleSaveRewardEdit(reward.id)}
+                        className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-semibold"
+                      >
+                        Opslaan
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEditingRewardId(null)}
+                        className="px-3 py-1.5 rounded-lg bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200"
+                      >
+                        Annuleer
+                      </button>
+                    </div>
+                  </div>
+                );
+              }
+
+              return (
+                <div
+                  key={reward.id}
+                  className="p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-slate-50/70 dark:hover:bg-slate-800/30"
+                >
+                  <div className="min-w-0">
+                    <div className="font-bold text-sm text-slate-900 dark:text-white truncate">
+                      {reward.title}
+                    </div>
+                    <div className="flex items-center gap-2.5 text-[11px] text-slate-500 mt-0.5 flex-wrap">
+                      <span className="font-mono font-bold text-amber-600 dark:text-amber-400">
+                        {reward.starsRequired}★ nodig
+                      </span>
+                      <span>·</span>
+                      <span>
+                        <strong>{reward.claimedCount || 0}x</strong> ingewisseld
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-1.5 shrink-0 flex-wrap">
+                    {(reward.claimedCount || 0) > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => onUpdateReward(reward.id, { claimedCount: 0 })}
+                        className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 font-semibold hover:bg-amber-100 transition-colors"
+                        title="Zet 'x ingewisseld' teller terug naar 0"
+                      >
+                        <RotateCcw className="w-3 h-3" />
+                        <span>Reset naar 0x</span>
+                      </button>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={() => startEditingReward(reward)}
+                      className="p-1.5 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 transition-colors"
+                      title="Beloning, sterren of teller aanpassen"
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                    </button>
+
+                    {confirmDeleteRewardId === reward.id ? (
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            onDeleteReward(reward.id);
+                            setConfirmDeleteRewardId(null);
+                          }}
+                          className="px-2 py-1 bg-red-600 text-white rounded font-semibold"
+                        >
+                          Verwijder
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setConfirmDeleteRewardId(null)}
+                          className="px-2 py-1 bg-slate-200 dark:bg-slate-700 rounded"
+                        >
+                          Nee
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setConfirmDeleteRewardId(reward.id)}
+                        className="p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/40 transition-colors"
+                        title="Beloning verwijderen"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </section>
+
+      {/* SECTION 4: Agenda's, Basis-agenda's, Volledige Kleuren & iCal Feeds */}
       <section className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 sm:p-6 shadow-xs space-y-5">
         <div className="flex items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-3 flex-wrap">
           <div className="flex items-center gap-2.5">
@@ -1971,6 +2473,38 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </div>
         </div>
 
+        {/* Quick 1-click Basis-agenda's strip */}
+        <div className="p-3.5 rounded-xl border border-amber-200/80 dark:border-amber-900/50 bg-amber-50/40 dark:bg-amber-950/15 space-y-2.5 text-xs">
+          <div className="font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+            <Sparkles className="w-4 h-4 text-amber-500" />
+            <span>Basis-agenda's snel toevoegen (met duidelijke iconen):</span>
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            {CALENDAR_PRESETS.map(preset => {
+              const exists = calendars.some(
+                c => c.name.trim().toLowerCase() === preset.name.toLowerCase()
+              );
+              return (
+                <button
+                  key={preset.key}
+                  type="button"
+                  onClick={() => handleAddPresetCalendar(preset)}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border font-semibold transition-colors ${
+                    exists
+                      ? 'bg-emerald-50 dark:bg-emerald-950/50 border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300'
+                      : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 hover:border-indigo-400 text-slate-800 dark:text-slate-200'
+                  }`}
+                  title={preset.description}
+                >
+                  <span>{preset.icon}</span>
+                  <span>{preset.name}</span>
+                  <span className="text-[10px] opacity-75">{exists ? '✓' : '+'}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
         {/* Add Local Calendar Form */}
         {isAddingCalendar && (
           <form
@@ -2001,6 +2535,26 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   placeholder="bijv. Alle roosters en vrije dagen"
                   className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm"
                 />
+              </div>
+            </div>
+
+            <div>
+              <label className="block font-semibold mb-1">Icoon</label>
+              <div className="flex items-center gap-1.5 flex-wrap">
+                {CALENDAR_ICONS.map(ic => (
+                  <button
+                    key={ic}
+                    type="button"
+                    onClick={() => setNewCalIcon(ic)}
+                    className={`w-8 h-8 rounded-lg border text-base flex items-center justify-center ${
+                      newCalIcon === ic
+                        ? 'border-indigo-500 bg-indigo-100 dark:bg-indigo-900/60'
+                        : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800'
+                    }`}
+                  >
+                    {ic}
+                  </button>
+                ))}
               </div>
             </div>
 
@@ -2040,7 +2594,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </form>
         )}
 
-        {/* Active Calendars with Full Color Picker, Person(s) Assignment & Multi-day Rule */}
+        {/* Active Calendars with Full Color Picker, Icon, Person(s) Assignment & Multi-day Rule */}
         <div className="space-y-3 text-xs">
           {calendars.map(cal => {
             const assignees = getCalendarAssignees(cal, familyMembers);
@@ -2050,7 +2604,20 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 space-y-3"
               >
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                  <div className="flex items-center gap-3 flex-1 min-w-0">
+                  <div className="flex items-center gap-2.5 flex-1 min-w-0">
+                    <select
+                      value={cal.icon || '📅'}
+                      onChange={e => handleUpdateCalendarField(cal.id, { icon: e.target.value })}
+                      className="w-10 h-9 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-base text-center shrink-0"
+                      aria-label="Agenda icoon"
+                    >
+                      {CALENDAR_ICONS.map(ic => (
+                        <option key={ic} value={ic}>
+                          {ic}
+                        </option>
+                      ))}
+                    </select>
+
                     <ColorPickerField
                       value={cal.color}
                       onChange={color => handleUpdateCalendarField(cal.id, { color })}

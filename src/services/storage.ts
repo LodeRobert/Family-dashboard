@@ -11,6 +11,13 @@ import {
 } from '../types';
 import { getLocalDateStr } from '../utils/dateTime';
 import { apiUrl } from '../utils/api';
+import {
+  DEFAULT_CLOTHING_RAIN_ADVICE,
+  DEFAULT_CLOTHING_RAIN_THRESHOLD,
+  DEFAULT_CLOTHING_RULES,
+  DEFAULT_CLOTHING_WIND_ADVICE,
+  DEFAULT_CLOTHING_WIND_THRESHOLD
+} from '../utils/weatherClothing';
 
 const LOCAL_STORAGE_KEY = 'homeboard_state_v1';
 
@@ -151,6 +158,13 @@ const FALLBACK_DEFAULT_STATE: AppState = {
     weatherTemp: 18,
     weatherCondition: 'Zonnig',
     weatherCode: 0,
+    showClothingAdvice: true,
+    clothingRules: DEFAULT_CLOTHING_RULES,
+    clothingRainThreshold: DEFAULT_CLOTHING_RAIN_THRESHOLD,
+    clothingRainAdvice: DEFAULT_CLOTHING_RAIN_ADVICE,
+    clothingWindThreshold: DEFAULT_CLOTHING_WIND_THRESHOLD,
+    clothingWindAdvice: DEFAULT_CLOTHING_WIND_ADVICE,
+    clothingCustomNote: '',
     hasSettingsPassword: false,
     kioskAutoDim: false,
     kioskDimAfterMinutes: 10,
@@ -246,7 +260,13 @@ function normalizeState(raw: any): AppState {
     dailyAutomationRules,
     settings: {
       ...FALLBACK_DEFAULT_STATE.settings,
-      ...(raw?.settings || {})
+      ...(raw?.settings || {}),
+      showClothingAdvice:
+        raw?.settings?.showClothingAdvice !== undefined ? raw.settings.showClothingAdvice : true,
+      clothingRules:
+        Array.isArray(raw?.settings?.clothingRules) && raw.settings.clothingRules.length > 0
+          ? raw.settings.clothingRules
+          : DEFAULT_CLOTHING_RULES
     }
   };
 }
@@ -540,10 +560,22 @@ export async function searchWeatherLocations(query: string): Promise<WeatherLoca
   return data.results || [];
 }
 
+export interface LiveWeatherResponse {
+  temp: number;
+  condition: string;
+  weatherCode: number;
+  tempMin?: number;
+  tempMax?: number;
+  precipitationProb?: number;
+  windSpeedMax?: number;
+  dailyWeatherCode?: number;
+  dailyCondition?: string;
+}
+
 export async function fetchCurrentWeather(
   lat: number,
   lon: number
-): Promise<{ temp: number; condition: string; weatherCode: number }> {
+): Promise<LiveWeatherResponse> {
   const res = await fetch(apiUrl(`/api/weather/current?lat=${lat}&lon=${lon}`));
   if (!res.ok) {
     throw new Error('Kon actueel weer niet ophalen');

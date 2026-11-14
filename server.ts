@@ -251,6 +251,7 @@ const DEFAULT_INITIAL_STATE = {
     weatherTemp: 18,
     weatherCondition: 'Zonnig',
     weatherCode: 0,
+    showClothingAdvice: true,
     settingsPasswordHash: '',
     haUrl: '',
     haToken: '',
@@ -623,7 +624,7 @@ app.get('/api/weather/search', async (req: Request, res: Response) => {
   }
 });
 
-// Open-Meteo Current Weather (free, no API key required)
+// Open-Meteo Current Weather & Today Forecast (free, no API key required)
 app.get('/api/weather/current', async (req: Request, res: Response) => {
   const lat = parseFloat(req.query.lat as string);
   const lon = parseFloat(req.query.lon as string);
@@ -633,7 +634,7 @@ app.get('/api/weather/current', async (req: Request, res: Response) => {
   }
 
   try {
-    const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,weather_code&timezone=auto`;
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,weather_code&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,wind_speed_10m_max&forecast_days=1&timezone=auto`;
     const response = await fetch(url);
     if (!response.ok) {
       throw new Error(`Weather API status ${response.status}`);
@@ -643,10 +644,29 @@ app.get('/api/weather/current', async (req: Request, res: Response) => {
     const weatherCode = Number(data.current?.weather_code ?? 0);
     const condition = translateWeatherCode(weatherCode);
 
+    const rawMin = data.daily?.temperature_2m_min?.[0];
+    const rawMax = data.daily?.temperature_2m_max?.[0];
+    const rawPrecip = data.daily?.precipitation_probability_max?.[0];
+    const rawWindMax = data.daily?.wind_speed_10m_max?.[0];
+    const rawDailyCode = data.daily?.weather_code?.[0];
+
+    const tempMin = rawMin != null ? Math.round(Number(rawMin)) : temp;
+    const tempMax = rawMax != null ? Math.round(Number(rawMax)) : temp;
+    const precipitationProb = rawPrecip != null ? Math.round(Number(rawPrecip)) : 0;
+    const windSpeedMax = rawWindMax != null ? Math.round(Number(rawWindMax)) : 0;
+    const dailyWeatherCode = rawDailyCode != null ? Number(rawDailyCode) : weatherCode;
+    const dailyCondition = translateWeatherCode(dailyWeatherCode);
+
     res.json({
       temp,
       weatherCode,
-      condition
+      condition,
+      tempMin,
+      tempMax,
+      precipitationProb,
+      windSpeedMax,
+      dailyWeatherCode,
+      dailyCondition
     });
   } catch (error: any) {
     console.error('Weather current error:', error);
@@ -1109,16 +1129,47 @@ app.post('/api/ha/test', async (req: Request, res: Response) => {
   }
 });
 
-// List HA calendar.* entities
+// List HA calendar.* entities (merge /calendars and /states so every calendar entity is reliably found)
 app.get('/api/ha/calendars', async (_req: Request, res: Response) => {
   try {
-    const list = await haFetch('/calendars');
-    const calendars = Array.isArray(list)
-      ? list.map((c: any) => ({
-          entityId: c.entity_id,
-          name: c.name || c.entity_id
-        }))
-      : [];
+    const [calendarsRes, statesRes] = await Promise.all([
+      haFetch('/calendars').catch(() => []),
+      haFetch('/states').catch(() => [])
+    ]);
+
+    const byEntity = new Map<string, { entityId: string; name: string }>();
+
+    if (Array.isArray(calendarsRes)) {
+      for (const c of calendarsRes) {
+        const entityId = String(c?.entity_id || '').trim();
+        if (!entityId) continue;
+        byEntity.set(entityId, {
+          entityId,
+          name: String(c?.name || entityId).trim()
+        });
+      }
+    }
+
+    if (Array.isArray(statesRes)) {
+      for (const s of statesRes) {
+        const entityId = String(s?.entity_id || '').trim();
+        if (!entityId.startsWith('calendar.')) continue;
+        const friendly = String(s?.attributes?.friendly_name || '').trim();
+        const existing = byEntity.get(entityId);
+        if (!existing) {
+          byEntity.set(entityId, {
+            entityId,
+            name: friendly || entityId
+          });
+        } else if (friendly && (!existing.name || existing.name === entityId)) {
+          existing.name = friendly;
+        }
+      }
+    }
+
+    const calendars = Array.from(byEntity.values()).sort((a, b) =>
+      a.name.localeCompare(b.name, 'nl')
+    );
     res.json({ calendars });
   } catch (error: any) {
     res.status(502).json({ error: error.message || 'Kon Home Assistant agenda\'s niet ophalen.' });

@@ -24,6 +24,7 @@ import {
   resolveEventAssignees,
   shouldEventShowOnDateList
 } from '../utils/calendarHelpers';
+import { getClothingAdvice } from '../utils/weatherClothing';
 import {
   Calendar as CalendarIcon,
   CheckCircle2,
@@ -39,7 +40,10 @@ import {
   CloudSnow,
   CloudLightning,
   CloudFog,
-  Lock,
+  Shirt,
+  Droplets,
+  Wind,
+  SlidersHorizontal,
   ListTodo
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
@@ -157,17 +161,17 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     onToggleChore(chore.id, todayStr);
   };
 
-  // Show active-period & all-day chores first on Dashboard
-  const sortedChores = [...chores].sort((a, b) => {
-    const aActive = isChoreActiveAtTime(a, currentTime) ? 0 : 1;
-    const bActive = isChoreActiveAtTime(b, currentTime) ? 0 : 1;
-    return aActive - bActive;
-  });
+  // Show ONLY chores active right now (current dagdeel / custom hours) + whole-day chores.
+  // Chores from other periods are only shown & doable on the Takenbord view.
+  const activeChores = chores.filter(c => isChoreActiveAtTime(c, currentTime));
+  const inactiveChoresCount = Math.max(0, chores.length - activeChores.length);
 
   const openGeneralTasks = generalTasks.filter(t => !t.completed).slice(0, 4);
+  const clothingAdvice = getClothingAdvice(settings);
+  const showClothingCard = settings.showClothingAdvice !== false;
 
-  const renderWeatherIcon = () => {
-    const code = settings.weatherCode ?? 0;
+  const renderWeatherIcon = (codeOverride?: number) => {
+    const code = codeOverride ?? settings.weatherCode ?? 0;
     if (code === 0 || code === 1) {
       return hours >= 19 || hours < 6 ? (
         <CloudSun className="w-6 h-6 text-indigo-300" />
@@ -227,17 +231,118 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 {renderWeatherIcon()}
               </div>
               <div>
-                <div className="text-xl sm:text-2xl font-bold font-mono tabular-nums">
-                  {settings.weatherTemp ?? 18}°C
+                <div className="text-xl sm:text-2xl font-bold font-mono tabular-nums flex items-baseline gap-2">
+                  <span>{settings.weatherTemp ?? 18}°C</span>
+                  {settings.weatherTempMin != null && settings.weatherTempMax != null && (
+                    <span className="text-xs font-normal text-slate-300">
+                      ({settings.weatherTempMin}° / {settings.weatherTempMax}°)
+                    </span>
+                  )}
                 </div>
                 <div className="text-xs text-slate-300 group-hover:underline">
                   {settings.cityName || 'Amsterdam'} · {settings.weatherCondition || 'Helder'}
+                  {settings.weatherPrecipitationProb != null && settings.weatherPrecipitationProb > 0
+                    ? ` · ☔ ${settings.weatherPrecipitationProb}%`
+                    : ''}
                 </div>
               </div>
             </button>
           </div>
         </div>
       </div>
+
+      {/* Today's Weather Forecast & Kids' Clothing Advice */}
+      {showClothingCard && (
+        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-4 sm:p-5 shadow-xs flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          {/* Left: Today's weather forecast summary */}
+          <div className="flex items-center gap-3.5 shrink-0">
+            <div className="w-12 h-12 rounded-xl bg-sky-50 dark:bg-sky-950/60 border border-sky-200/70 dark:border-sky-800/60 flex items-center justify-center shrink-0">
+              {renderWeatherIcon(settings.weatherDailyCode ?? settings.weatherCode)}
+            </div>
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-xs font-bold uppercase tracking-wider text-sky-700 dark:text-sky-300">
+                  Weer vandaag · {settings.cityName || 'Amsterdam'}
+                </span>
+                <span className="text-xs text-slate-500 dark:text-slate-400">
+                  ({settings.weatherDailyCondition || settings.weatherCondition || 'Helder'})
+                </span>
+              </div>
+              <div className="flex items-center gap-3 mt-1 text-xs text-slate-700 dark:text-slate-300 flex-wrap font-mono tabular-nums">
+                <span className="font-bold text-slate-900 dark:text-white">
+                  {settings.weatherTempMin != null && settings.weatherTempMax != null
+                    ? `${settings.weatherTempMin}°C – ${settings.weatherTempMax}°C`
+                    : `Nu ${settings.weatherTemp ?? 18}°C`}
+                </span>
+                {settings.weatherPrecipitationProb != null && (
+                  <span className="inline-flex items-center gap-1 text-sky-600 dark:text-sky-400">
+                    <Droplets className="w-3.5 h-3.5" />
+                    {settings.weatherPrecipitationProb}% regenkans
+                  </span>
+                )}
+                {settings.weatherWindMax != null && settings.weatherWindMax > 0 && (
+                  <span className="inline-flex items-center gap-1 text-slate-500 dark:text-slate-400">
+                    <Wind className="w-3.5 h-3.5" />
+                    {settings.weatherWindMax} km/u
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="hidden lg:block h-10 w-px bg-slate-200 dark:bg-slate-800 shrink-0" />
+
+          {/* Right: Kids' Clothing Advice */}
+          <div className="flex-1 min-w-0 space-y-2">
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="inline-flex items-center gap-1.5 text-xs font-bold text-amber-700 dark:text-amber-300">
+                  <Shirt className="w-4 h-4 text-amber-500" />
+                  Kleren kindjes vandaag:
+                </span>
+                <span className="text-xs sm:text-sm font-semibold text-slate-900 dark:text-white">
+                  {clothingAdvice.headline}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={onNavigateToSettings}
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-[11px] font-semibold text-slate-600 dark:text-slate-300 shrink-0 transition-colors"
+                title="Kledingregels en eigen notitie aanpassen in Instellingen"
+              >
+                <SlidersHorizontal className="w-3 h-3" />
+                <span>Aanpassen</span>
+              </button>
+            </div>
+
+            <div className="flex items-center gap-1.5 flex-wrap">
+              {clothingAdvice.items.map((item, idx) => (
+                <span
+                  key={idx}
+                  className="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700 text-[11px] font-medium text-slate-800 dark:text-slate-200"
+                >
+                  {item}
+                </span>
+              ))}
+            </div>
+
+            {(clothingAdvice.extras.length > 0 || clothingAdvice.customNote) && (
+              <div className="flex flex-col gap-1 text-[11px]">
+                {clothingAdvice.extras.map((ext, i) => (
+                  <div key={i} className="text-sky-700 dark:text-sky-300 font-medium">
+                    {ext}
+                  </div>
+                ))}
+                {clothingAdvice.customNote && (
+                  <div className="text-indigo-700 dark:text-indigo-300 font-semibold">
+                    📝 {clothingAdvice.customNote}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Main Grid: Vandaag op de planning (Left) + Gezinsleden & Taken (Right) */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
@@ -343,6 +448,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                         {timeFormatted}
                       </div>
                       <div className="text-[11px] text-slate-400 dark:text-slate-500">
+                        {calSource?.icon ? `${calSource.icon} ` : ''}
                         {calName}
                       </div>
                     </div>
@@ -382,6 +488,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                           style={{ backgroundColor: calColor }}
                         />
                         <CalendarAssigneeBadge assignees={assignees} compact showText={false} />
+                        {calSource?.icon && (
+                          <span className="text-xs shrink-0" title={calSource.name}>
+                            {calSource.icon}
+                          </span>
+                        )}
                         <span className="font-medium text-slate-900 dark:text-slate-100 truncate">
                           {evt.title}
                         </span>
@@ -454,30 +565,45 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             })}
           </div>
 
-          {/* Quick routine check list (with time-of-day enforcement) */}
+          {/* Quick routine check list (strictly active dagdeel & hele dag only) */}
           <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-4 shadow-xs space-y-3">
-            <div className="flex items-center justify-between text-xs text-slate-500">
+            <div className="flex items-center justify-between gap-2 text-xs text-slate-500 flex-wrap">
               <span className="font-semibold uppercase tracking-wider">
-                Vandaag afvinken ({greetingPeriod})
+                Nu te doen ({greetingPeriod} & hele dag)
               </span>
-              <span>Alleen actief dagdeel & hele dag</span>
+              {inactiveChoresCount > 0 && (
+                <button
+                  type="button"
+                  onClick={onNavigateToChores}
+                  className="text-[11px] text-indigo-600 dark:text-indigo-400 hover:underline font-medium"
+                >
+                  +{inactiveChoresCount} taken voor ander dagdeel →
+                </button>
+              )}
             </div>
 
-            <div className="space-y-2">
-              {sortedChores.length === 0 ? (
-                <p className="text-xs text-slate-400 text-center py-4">
-                  Nog geen taken aangemaakt. Voeg taken toe op het Takenbord.
-                </p>
+            <div className="space-y-2 max-h-80 overflow-y-auto pr-0.5">
+              {activeChores.length === 0 ? (
+                <div className="text-xs text-slate-400 text-center py-4 space-y-1.5">
+                  <p>Geen taken gepland voor dit dagdeel.</p>
+                  {chores.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={onNavigateToChores}
+                      className="text-indigo-600 dark:text-indigo-400 font-semibold hover:underline"
+                    >
+                      Bekijk alle taken op het Takenbord
+                    </button>
+                  )}
+                </div>
               ) : (
-                sortedChores.slice(0, 5).map(chore => {
+                activeChores.map(chore => {
                   const member = familyMembers.find(m => m.id === chore.memberId);
                   const isCompleted = isChoreCompletedOnDate(
                     choreCompletionsByDate,
                     todayStr,
                     chore.id
                   );
-                  const isActive = isChoreActiveAtTime(chore, currentTime);
-                  const canClick = isActive || isCompleted;
                   const effectiveRange = getChoreEffectiveTimeRange(chore);
                   const customHours = hasCustomChoreHours(chore);
 
@@ -485,26 +611,19 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     <button
                       key={chore.id}
                       onClick={() => handleChoreClick(chore)}
-                      disabled={!canClick}
                       title={
                         isCompleted
                           ? 'Tik om taak weer uit te vinken (ontvinken)'
-                          : isActive
-                          ? 'Tik om te voltooien'
-                          : `Alleen af te vinken tussen ${effectiveRange}`
+                          : 'Tik om te voltooien'
                       }
-                      className={`w-full p-2.5 rounded-lg border text-left flex items-center justify-between gap-3 transition-all ${
-                        !canClick
-                          ? 'bg-slate-50/60 dark:bg-slate-800/20 border-slate-200/60 dark:border-slate-800 text-slate-400 cursor-not-allowed opacity-70'
-                          : isCompleted
-                          ? 'bg-emerald-50/60 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800/50 text-emerald-900 dark:text-emerald-200 cursor-pointer hover:border-emerald-400'
-                          : 'bg-slate-50/80 dark:bg-slate-800/40 border-slate-200 dark:border-slate-700/60 text-slate-800 dark:text-slate-200 hover:border-indigo-300 cursor-pointer'
+                      className={`w-full p-2.5 rounded-lg border text-left flex items-center justify-between gap-3 transition-all cursor-pointer ${
+                        isCompleted
+                          ? 'bg-emerald-50/60 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800/50 text-emerald-900 dark:text-emerald-200 hover:border-emerald-400'
+                          : 'bg-slate-50/80 dark:bg-slate-800/40 border-slate-200 dark:border-slate-700/60 text-slate-800 dark:text-slate-200 hover:border-indigo-300'
                       }`}
                     >
                       <div className="flex items-center gap-2.5 truncate">
-                        {!isActive && !isCompleted ? (
-                          <Lock className="w-4 h-4 text-slate-400 shrink-0" />
-                        ) : isCompleted ? (
+                        {isCompleted ? (
                           <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
                         ) : (
                           <Circle className="w-4 h-4 text-slate-400 shrink-0" />
