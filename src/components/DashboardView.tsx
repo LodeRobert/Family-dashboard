@@ -17,13 +17,20 @@ import {
   hasCustomChoreHours,
   isChoreCompletedOnDate,
   getEventStartDateStr,
-  formatLocalDateNL
+  formatLocalDateNL,
+  shiftLocalDateStr
 } from '../utils/dateTime';
 import {
   formatEventTimeDisplay,
+  hexToRgba,
   resolveEventAssignees,
   shouldEventShowOnDateList
 } from '../utils/calendarHelpers';
+import {
+  getCalendarPresetByKey,
+  inferCalendarCategory,
+  isHighlightedStandardCategory
+} from '../utils/calendarPresets';
 import { getClothingAdvice } from '../utils/weatherClothing';
 import {
   Calendar as CalendarIcon,
@@ -115,6 +122,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const visibleCalendarIds = new Set(calendars.filter(c => c.visible).map(c => c.id));
 
   const localToday = getLocalDateStr(currentTime);
+  const localTomorrow = shiftLocalDateStr(localToday, 1);
 
   const todayEvents = events
     .filter(evt => visibleCalendarIds.has(evt.calendarId))
@@ -125,6 +133,44 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       if (Boolean(a.allDay) !== Boolean(b.allDay)) return a.allDay ? -1 : 1;
       return new Date(a.startTime).getTime() - new Date(b.startTime).getTime();
     });
+
+  // Highlighted standard calendars (Vuilbakken, Verjaardagen, Vakanties, School, Dokter) for Today & Tomorrow
+  const highlightedStandardItems: {
+    event: CalendarEvent;
+    calendar: CalendarSource;
+    dayLabel: 'Vandaag' | 'Morgen';
+    presetName: string;
+    presetIcon: string;
+    color: string;
+  }[] = [];
+
+  for (const evt of events) {
+    if (!visibleCalendarIds.has(evt.calendarId)) continue;
+    const cal = calendarMap.get(evt.calendarId);
+    if (!cal) continue;
+    const cat = inferCalendarCategory(cal);
+    if (!isHighlightedStandardCategory(cat)) continue;
+    const preset = getCalendarPresetByKey(cat);
+    if (!preset) continue;
+
+    const onToday = shouldEventShowOnDateList(evt, cal, localToday);
+    const onTomorrow = !onToday && shouldEventShowOnDateList(evt, cal, localTomorrow);
+    if (!onToday && !onTomorrow) continue;
+
+    highlightedStandardItems.push({
+      event: evt,
+      calendar: cal,
+      dayLabel: onToday ? 'Vandaag' : 'Morgen',
+      presetName: cal.name || preset.name,
+      presetIcon: cal.icon || preset.icon,
+      color: cal.color || preset.color
+    });
+  }
+
+  highlightedStandardItems.sort((a, b) => {
+    if (a.dayLabel !== b.dayLabel) return a.dayLabel === 'Vandaag' ? -1 : 1;
+    return new Date(a.event.startTime).getTime() - new Date(b.event.startTime).getTime();
+  });
 
   const upcomingEvents = events
     .filter(evt => visibleCalendarIds.has(evt.calendarId))
@@ -346,8 +392,62 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
       {/* Main Grid: Vandaag op de planning (Left) + Gezinsleden & Taken (Right) */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* Left Column: Vandaag op de agenda */}
+        {/* Left Column: Standaard Agenda Highlights + Vandaag op de agenda */}
         <div className="lg:col-span-7 space-y-4">
+          {highlightedStandardItems.length > 0 && (
+            <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-4 shadow-xs space-y-2.5">
+              <div className="flex items-center justify-between gap-2 text-xs">
+                <span className="font-bold uppercase tracking-wider text-slate-700 dark:text-slate-200 flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                  <span>Standaard agenda&apos;s · Vandaag &amp; Morgen</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={onNavigateToCalendar}
+                  className="text-indigo-600 dark:text-indigo-400 font-semibold hover:underline"
+                >
+                  Open kalender
+                </button>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {highlightedStandardItems.map(item => (
+                  <button
+                    key={`${item.event.id}-${item.dayLabel}`}
+                    type="button"
+                    onClick={() => onSelectEvent?.(item.event)}
+                    style={{
+                      borderColor: hexToRgba(item.color, 0.45),
+                      borderLeftColor: item.color,
+                      backgroundColor: hexToRgba(item.color, 0.12)
+                    }}
+                    className="p-2.5 rounded-lg border border-l-4 text-left flex items-center justify-between gap-2.5 hover:brightness-95 transition-all cursor-pointer"
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <span className="text-xl shrink-0">{item.presetIcon}</span>
+                      <div className="min-w-0">
+                        <div className="text-[10px] font-bold uppercase tracking-wider truncate" style={{ color: item.color }}>
+                          {item.presetName}
+                        </div>
+                        <div className="text-xs font-bold text-slate-900 dark:text-white truncate">
+                          {item.event.title}
+                        </div>
+                      </div>
+                    </div>
+                    <span
+                      className={`text-[10px] font-bold px-2 py-0.5 rounded shrink-0 ${
+                        item.dayLabel === 'Vandaag'
+                          ? 'bg-emerald-600 text-white'
+                          : 'bg-amber-500 text-white'
+                      }`}
+                    >
+                      {item.dayLabel}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <CalendarIcon className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
@@ -401,6 +501,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 const calSource = calendarMap.get(evt.calendarId);
                 const calColor = calSource?.color || evt.calendarColor || '#6366F1';
                 const calName = calSource?.name || evt.calendarName || 'Agenda';
+                const preset = calSource
+                  ? getCalendarPresetByKey(inferCalendarCategory(calSource))
+                  : undefined;
+                const calIcon = calSource?.icon || preset?.icon;
                 const assignees = resolveEventAssignees(evt, calSource, familyMembers);
                 const timeFormatted = formatEventTimeDisplay(
                   evt,
@@ -413,7 +517,17 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     key={evt.id}
                     type="button"
                     onClick={() => onSelectEvent?.(evt)}
-                    className="w-full text-left p-4 hover:bg-slate-50/70 dark:hover:bg-slate-800/40 transition-colors flex items-start justify-between gap-4 cursor-pointer"
+                    style={
+                      preset
+                        ? {
+                            borderLeftColor: calColor,
+                            backgroundColor: hexToRgba(calColor, 0.05)
+                          }
+                        : undefined
+                    }
+                    className={`w-full text-left p-4 hover:bg-slate-50/70 dark:hover:bg-slate-800/40 transition-colors flex items-start justify-between gap-4 cursor-pointer ${
+                      preset ? 'border-l-4' : ''
+                    }`}
                   >
                     <div className="flex items-start gap-3.5 min-w-0">
                       <div
@@ -421,11 +535,23 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                         style={{ backgroundColor: calColor }}
                       />
                       <div className="space-y-1 min-w-0">
-                        <div className="flex items-center gap-2.5 flex-wrap">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          {calIcon && <span className="text-sm">{calIcon}</span>}
                           <span className="font-semibold text-slate-900 dark:text-white text-sm">
                             {evt.title}
                           </span>
                           <CalendarAssigneeBadge assignees={assignees} compact />
+                          {preset && (
+                            <span
+                              className="text-[10px] px-2 py-0.5 rounded font-bold"
+                              style={{
+                                backgroundColor: hexToRgba(calColor, 0.14),
+                                color: calColor
+                              }}
+                            >
+                              {preset.icon} {calName}
+                            </span>
+                          )}
                         </div>
 
                         {evt.description && (
@@ -448,7 +574,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                         {timeFormatted}
                       </div>
                       <div className="text-[11px] text-slate-400 dark:text-slate-500">
-                        {calSource?.icon ? `${calSource.icon} ` : ''}
+                        {calIcon ? `${calIcon} ` : ''}
                         {calName}
                       </div>
                     </div>
@@ -468,6 +594,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 {upcomingEvents.map(evt => {
                   const calSource = calendarMap.get(evt.calendarId);
                   const calColor = calSource?.color || evt.calendarColor || '#6366F1';
+                  const preset = calSource
+                    ? getCalendarPresetByKey(inferCalendarCategory(calSource))
+                    : undefined;
+                  const calIcon = calSource?.icon || preset?.icon;
                   const assignees = resolveEventAssignees(evt, calSource, familyMembers);
                   const eventDate = formatLocalDateNL(getEventStartDateStr(evt), {
                     weekday: 'short',
@@ -480,7 +610,17 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                       key={evt.id}
                       type="button"
                       onClick={() => onSelectEvent?.(evt)}
-                      className="w-full text-left p-3 bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-800 hover:border-indigo-300 dark:hover:border-indigo-700 transition-colors text-xs flex items-center justify-between gap-2 cursor-pointer"
+                      style={
+                        preset
+                          ? {
+                              borderLeftColor: calColor,
+                              backgroundColor: hexToRgba(calColor, 0.06)
+                            }
+                          : undefined
+                      }
+                      className={`w-full text-left p-3 bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-800 hover:border-indigo-300 dark:hover:border-indigo-700 transition-colors text-xs flex items-center justify-between gap-2 cursor-pointer ${
+                        preset ? 'border-l-4' : ''
+                      }`}
                     >
                       <div className="flex items-center gap-2 min-w-0">
                         <div
@@ -488,9 +628,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                           style={{ backgroundColor: calColor }}
                         />
                         <CalendarAssigneeBadge assignees={assignees} compact showText={false} />
-                        {calSource?.icon && (
-                          <span className="text-xs shrink-0" title={calSource.name}>
-                            {calSource.icon}
+                        {calIcon && (
+                          <span className="text-xs shrink-0" title={calSource?.name}>
+                            {calIcon}
                           </span>
                         )}
                         <span className="font-medium text-slate-900 dark:text-slate-100 truncate">

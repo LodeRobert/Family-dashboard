@@ -15,8 +15,6 @@ import {
   shiftLocalDateStr
 } from '../utils/dateTime';
 import {
-  calendarMatchesPersonFilter,
-  eventMatchesPersonFilter,
   formatEventTimeDisplay,
   getCalendarAssignees,
   getDayHourGridData,
@@ -25,8 +23,14 @@ import {
   shouldEventShowOnDateList
 } from '../utils/calendarHelpers';
 import {
+  getCalendarPresetByKey,
+  inferCalendarCategory
+} from '../utils/calendarPresets';
+import {
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
+  ChevronUp,
   Plus,
   Settings,
   Calendar as CalendarIcon,
@@ -35,7 +39,9 @@ import {
   History,
   Sun,
   Home,
-  Users
+  Users,
+  Check,
+  Minus
 } from 'lucide-react';
 
 interface CalendarViewProps {
@@ -47,10 +53,21 @@ interface CalendarViewProps {
   onSelectEvent: (event: CalendarEvent) => void;
   onOpenManageCalendars: () => void;
   onToggleCalendarVisibility: (calendarId: string) => void;
+  onSetCalendarsVisibility?: (updates: Record<string, boolean>) => void;
 }
 
 const HOUR_HEIGHT = 44; // 44px per hour -> 24h = 1056px
 const HOURS = Array.from({ length: 24 }, (_, i) => i);
+
+interface OwnerGroup {
+  key: string;
+  label: string;
+  sublabel: string;
+  accentColor: string;
+  members: FamilyMember[];
+  isFamily: boolean;
+  calendars: CalendarSource[];
+}
 
 export const CalendarView: React.FC<CalendarViewProps> = ({
   events,
@@ -60,12 +77,13 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
   onOpenNewEvent,
   onSelectEvent,
   onOpenManageCalendars,
-  onToggleCalendarVisibility
+  onToggleCalendarVisibility,
+  onSetCalendarsVisibility
 }) => {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [viewMode, setViewMode] = useState<CalendarViewMode>('week');
   const [showPastInAgenda, setShowPastInAgenda] = useState(false);
-  const [personFilter, setPersonFilter] = useState<string>('all'); // 'all' | 'family' | memberId
+  const [isSelectorExpanded, setIsSelectorExpanded] = useState(true);
   const [nowTick, setNowTick] = useState(() => new Date());
 
   useEffect(() => {
@@ -73,14 +91,10 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
     return () => clearInterval(timer);
   }, []);
 
-  // Resolve live calendar metadata & filter events by visible calendars + selected person filter
+  // Resolve live calendar metadata & filter events strictly by selected/visible calendars
   const calendarMap = new Map<string, CalendarSource>(calendars.map(c => [c.id, c]));
   const visibleCalendarIds = new Set(calendars.filter(c => c.visible).map(c => c.id));
-  const activeEvents = events
-    .filter(e => visibleCalendarIds.has(e.calendarId))
-    .filter(e =>
-      eventMatchesPersonFilter(e, calendarMap.get(e.calendarId), personFilter, familyMembers)
-    );
+  const activeEvents = events.filter(e => visibleCalendarIds.has(e.calendarId));
 
   // Date Navigation
   const handlePrev = () => {
@@ -186,9 +200,90 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
   const todayStr = getLocalDateStr(nowTick);
   const nowMinutes = nowTick.getHours() * 60 + nowTick.getMinutes();
 
-  const legendCalendars = calendars.filter(cal =>
-    personFilter === 'all' ? true : calendarMatchesPersonFilter(cal, personFilter, familyMembers)
-  );
+  // Build structured owner groups (Hele gezin + each person + multi-member shared groups)
+  const ownerGroups: OwnerGroup[] = [];
+  const familyCals: CalendarSource[] = [];
+  const perMemberCals = new Map<string, CalendarSource[]>(familyMembers.map(m => [m.id, []]));
+  const sharedGroupMap = new Map<string, { members: FamilyMember[]; calendars: CalendarSource[] }>();
+
+  for (const cal of calendars) {
+    const resolved = getCalendarAssignees(cal, familyMembers);
+    if (resolved.isFamily || resolved.members.length === 0) {
+      familyCals.push(cal);
+    } else if (resolved.members.length === 1) {
+      const mId = resolved.members[0].id;
+      const list = perMemberCals.get(mId) || [];
+      list.push(cal);
+      perMemberCals.set(mId, list);
+    } else {
+      const sortedIds = [...resolved.members]
+        .sort((a, b) => a.id.localeCompare(b.id))
+        .map(m => m.id)
+        .join('|');
+      const existing = sharedGroupMap.get(sortedIds);
+      if (existing) {
+        existing.calendars.push(cal);
+      } else {
+        sharedGroupMap.set(sortedIds, {
+          members: resolved.members,
+          calendars: [cal]
+        });
+      }
+    }
+  }
+
+  ownerGroups.push({
+    key: 'family',
+    label: 'Hele gezin',
+    sublabel: 'Gezamenlijke & standaard agenda’s',
+    accentColor: '#6366F1',
+    members: [],
+    isFamily: true,
+    calendars: familyCals
+  });
+
+  for (const member of familyMembers) {
+    ownerGroups.push({
+      key: `member-${member.id}`,
+      label: member.name,
+      sublabel: member.role === 'parent' ? 'Ouder' : 'Kind',
+      accentColor: member.color,
+      members: [member],
+      isFamily: false,
+      calendars: perMemberCals.get(member.id) || []
+    });
+  }
+
+  for (const [groupKey, groupData] of sharedGroupMap.entries()) {
+    ownerGroups.push({
+      key: `shared-${groupKey}`,
+      label: groupData.members.map(m => m.name).join(' & '),
+      sublabel: 'Gedeelde groep',
+      accentColor: groupData.members[0]?.color || '#10B981',
+      members: groupData.members,
+      isFamily: false,
+      calendars: groupData.calendars
+    });
+  }
+
+  const handleSetGroupVisibility = (targetCals: CalendarSource[], makeVisible: boolean) => {
+    if (targetCals.length === 0) return;
+    if (onSetCalendarsVisibility) {
+      const updates: Record<string, boolean> = {};
+      for (const c of targetCals) {
+        updates[c.id] = makeVisible;
+      }
+      onSetCalendarsVisibility(updates);
+    } else {
+      for (const c of targetCals) {
+        if (c.visible !== makeVisible) {
+          onToggleCalendarVisibility(c.id);
+        }
+      }
+    }
+  };
+
+  const visibleCount = calendars.filter(c => c.visible).length;
 
   return (
     <div className="space-y-3.5 pb-12">
@@ -288,101 +383,276 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
         </div>
       </div>
 
-      {/* Person / Family Filter Strip + Calendars Legend */}
-      <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-3 shadow-xs space-y-2.5">
-        {/* Filter by Person or Whole Family */}
-        <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 text-xs">
-          <span className="text-slate-400 font-semibold shrink-0 flex items-center gap-1 mr-1">
-            <Users className="w-3.5 h-3.5" />
-            <span>Persoon:</span>
-          </span>
+      {/* Per-Person & Group Calendar Selection Panel (Columns/Rows with Multi-Select) */}
+      <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-3.5 shadow-xs space-y-3">
+        {/* Top Bar: Title + Quick Global Toggles + Collapse */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+          <div className="flex items-center gap-2 flex-wrap">
+            <Users className="w-4 h-4 text-indigo-600 dark:text-indigo-400 shrink-0" />
+            <span className="font-bold text-slate-900 dark:text-white">
+              Agenda&apos;s per persoon &amp; groep selecteren
+            </span>
+            <span className="text-[11px] font-mono tabular-nums px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
+              {visibleCount}/{calendars.length} actief
+            </span>
+          </div>
 
-          <button
-            type="button"
-            onClick={() => setPersonFilter('all')}
-            className={`px-3 py-1.5 rounded-lg border font-semibold transition-all shrink-0 ${
-              personFilter === 'all'
-                ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
-                : 'bg-slate-50 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100'
-            }`}
-          >
-            Iedereen
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setPersonFilter('family')}
-            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border font-semibold transition-all shrink-0 ${
-              personFilter === 'family'
-                ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
-                : 'bg-slate-50 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100'
-            }`}
-          >
-            <Home className="w-3.5 h-3.5" />
-            <span>Hele gezin</span>
-          </button>
-
-          {familyMembers.map(member => {
-            const isActive = personFilter === member.id;
-            return (
-              <button
-                key={member.id}
-                type="button"
-                onClick={() => setPersonFilter(isActive ? 'all' : member.id)}
-                style={
-                  isActive
-                    ? {
-                        borderColor: member.color,
-                        backgroundColor: hexToRgba(member.color, 0.14)
-                      }
-                    : undefined
-                }
-                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border font-semibold transition-all shrink-0 ${
-                  isActive
-                    ? 'text-slate-900 dark:text-white ring-1'
-                    : 'bg-slate-50 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100'
-                }`}
-              >
-                <MemberAvatar member={member} size="xs" />
-                <span>{member.name}</span>
-              </button>
-            );
-          })}
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <button
+              type="button"
+              onClick={() => handleSetGroupVisibility(calendars, true)}
+              className="px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 text-slate-700 dark:text-slate-200 font-semibold transition-colors"
+            >
+              Alles aan
+            </button>
+            <button
+              type="button"
+              onClick={() => handleSetGroupVisibility(calendars, false)}
+              className="px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 font-semibold transition-colors"
+            >
+              Alles uit
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsSelectorExpanded(p => !p)}
+              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 font-medium"
+            >
+              <span>{isSelectorExpanded ? 'Inklappen' : 'Kiezen'}</span>
+              {isSelectorExpanded ? (
+                <ChevronUp className="w-3.5 h-3.5" />
+              ) : (
+                <ChevronDown className="w-3.5 h-3.5" />
+              )}
+            </button>
+          </div>
         </div>
 
-        {/* Calendars Legend with Clear Owner Indicators */}
-        <div className="flex items-center gap-2 overflow-x-auto pt-2 border-t border-slate-100 dark:border-slate-800 text-xs">
-          <span className="text-slate-400 font-medium shrink-0">Agenda's:</span>
-          {legendCalendars.length === 0 ? (
-            <span className="text-slate-400 italic">
-              Geen agenda's gekoppeld aan deze selectie.
-            </span>
-          ) : (
-            legendCalendars.map(cal => {
-              const assignees = getCalendarAssignees(cal, familyMembers);
+        {/* Compact Quick Chips when Collapsed */}
+        {!isSelectorExpanded && (
+          <div className="flex items-center gap-1.5 flex-wrap text-xs pt-1 border-t border-slate-100 dark:border-slate-800">
+            {ownerGroups
+              .filter(g => g.calendars.length > 0)
+              .map(group => {
+                const activeInGroup = group.calendars.filter(c => c.visible).length;
+                const allActive = activeInGroup === group.calendars.length;
+                const someActive = activeInGroup > 0 && !allActive;
+                return (
+                  <button
+                    key={group.key}
+                    type="button"
+                    onClick={() => handleSetGroupVisibility(group.calendars, !allActive)}
+                    style={
+                      activeInGroup > 0
+                        ? {
+                            borderColor: group.accentColor,
+                            backgroundColor: hexToRgba(group.accentColor, 0.12)
+                          }
+                        : undefined
+                    }
+                    className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border font-semibold transition-colors ${
+                      activeInGroup > 0
+                        ? 'text-slate-900 dark:text-white'
+                        : 'bg-slate-50 dark:bg-slate-800/40 border-slate-200 dark:border-slate-700 text-slate-400'
+                    }`}
+                  >
+                    <span
+                      className="w-3.5 h-3.5 rounded flex items-center justify-center border"
+                      style={
+                        allActive || someActive
+                          ? {
+                              backgroundColor: group.accentColor,
+                              borderColor: group.accentColor,
+                              color: '#fff'
+                            }
+                          : undefined
+                      }
+                    >
+                      {allActive ? (
+                        <Check className="w-2.5 h-2.5" />
+                      ) : someActive ? (
+                        <Minus className="w-2.5 h-2.5" />
+                      ) : null}
+                    </span>
+                    <span>{group.label}</span>
+                    <span className="text-[10px] font-mono opacity-75">
+                      ({activeInGroup}/{group.calendars.length})
+                    </span>
+                  </button>
+                );
+              })}
+          </div>
+        )}
+
+        {/* Responsive Columns Grid by Person & Group */}
+        {isSelectorExpanded && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2.5 pt-2 border-t border-slate-100 dark:border-slate-800">
+            {ownerGroups.map(group => {
+              const total = group.calendars.length;
+              const activeCount = group.calendars.filter(c => c.visible).length;
+              const allActive = total > 0 && activeCount === total;
+              const someActive = activeCount > 0 && activeCount < total;
+
               return (
-                <button
-                  key={cal.id}
-                  onClick={() => onToggleCalendarVisibility(cal.id)}
-                  className={`inline-flex items-center gap-2 px-2.5 py-1 rounded-lg border transition-all shrink-0 ${
-                    cal.visible
-                      ? 'bg-slate-50/70 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 font-medium'
-                      : 'bg-slate-100 dark:bg-slate-800/30 border-transparent text-slate-400 line-through opacity-55'
+                <div
+                  key={group.key}
+                  className={`rounded-xl border transition-all flex flex-col overflow-hidden ${
+                    activeCount > 0
+                      ? 'border-slate-300 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-800/40'
+                      : 'border-slate-200/80 dark:border-slate-800 bg-slate-50/30 dark:bg-slate-900/50'
                   }`}
                 >
-                  <span
-                    className="w-2.5 h-2.5 rounded-full shrink-0"
-                    style={{ backgroundColor: cal.color }}
-                  />
-                  {cal.icon && <span className="text-xs leading-none">{cal.icon}</span>}
-                  <span>{cal.name}</span>
-                  <span className="text-slate-300 dark:text-slate-600">|</span>
-                  <CalendarAssigneeBadge assignees={assignees} compact />
-                </button>
+                  {/* Group / Person Master Toggle Header */}
+                  <button
+                    type="button"
+                    disabled={total === 0}
+                    onClick={() => handleSetGroupVisibility(group.calendars, !allActive)}
+                    className={`w-full px-3 py-2 flex items-center justify-between gap-2 text-left border-b border-slate-200/70 dark:border-slate-700/60 transition-colors ${
+                      total > 0
+                        ? 'hover:bg-slate-100/80 dark:hover:bg-slate-800/80 cursor-pointer'
+                        : 'opacity-70 cursor-default'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      {group.isFamily ? (
+                        <span className="w-6 h-6 rounded-full bg-indigo-100 dark:bg-indigo-950/70 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0">
+                          <Home className="w-3.5 h-3.5" />
+                        </span>
+                      ) : group.members.length === 1 ? (
+                        <MemberAvatar member={group.members[0]} size="xs" />
+                      ) : (
+                        <div className="flex items-center -space-x-1.5 shrink-0">
+                          {group.members.slice(0, 3).map(m => (
+                            <MemberAvatar key={m.id} member={m} size="xs" />
+                          ))}
+                        </div>
+                      )}
+                      <div className="min-w-0">
+                        <div className="text-xs font-bold text-slate-900 dark:text-white truncate">
+                          {group.label}
+                        </div>
+                        <div className="text-[10px] text-slate-500 truncate">
+                          {group.sublabel}
+                        </div>
+                      </div>
+                    </div>
+
+                    {total > 0 ? (
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <span className="text-[10px] font-mono tabular-nums text-slate-500">
+                          {activeCount}/{total}
+                        </span>
+                        <span
+                          className={`w-4 h-4 rounded flex items-center justify-center border transition-colors ${
+                            allActive || someActive
+                              ? 'text-white border-transparent'
+                              : 'border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900'
+                          }`}
+                          style={
+                            allActive || someActive
+                              ? { backgroundColor: group.accentColor }
+                              : undefined
+                          }
+                        >
+                          {allActive ? (
+                            <Check className="w-3 h-3" />
+                          ) : someActive ? (
+                            <Minus className="w-3 h-3" />
+                          ) : null}
+                        </span>
+                      </div>
+                    ) : (
+                      <span className="text-[10px] text-slate-400">0</span>
+                    )}
+                  </button>
+
+                  {/* Individual Calendars inside this Person/Group Column */}
+                  <div className="p-2 space-y-1 flex-1">
+                    {total === 0 ? (
+                      <button
+                        type="button"
+                        onClick={onOpenManageCalendars}
+                        className="w-full py-2 px-2 text-[11px] text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 text-left rounded-lg transition-colors"
+                      >
+                        Geen eigen agenda — + koppelen
+                      </button>
+                    ) : (
+                      group.calendars.map(cal => {
+                        const cat = inferCalendarCategory(cal);
+                        const preset = getCalendarPresetByKey(cat);
+                        const displayIcon = cal.icon || preset?.icon;
+                        const sourceShort =
+                          cal.type === 'homeassistant'
+                            ? 'HA'
+                            : cal.type === 'ical'
+                            ? 'iCal'
+                            : 'Lokaal';
+
+                        return (
+                          <button
+                            key={cal.id}
+                            type="button"
+                            onClick={() => onToggleCalendarVisibility(cal.id)}
+                            className={`w-full px-2 py-1.5 rounded-lg border text-left flex items-center justify-between gap-2 text-xs transition-all cursor-pointer ${
+                              cal.visible
+                                ? 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 shadow-2xs'
+                                : 'bg-transparent border-transparent text-slate-400 dark:text-slate-500 opacity-65 hover:bg-slate-100/60 dark:hover:bg-slate-800/40'
+                            }`}
+                          >
+                            <div className="flex items-center gap-2 min-w-0 flex-1">
+                              <span
+                                className={`w-4 h-4 rounded flex items-center justify-center border shrink-0 transition-colors ${
+                                  cal.visible
+                                    ? 'text-white border-transparent'
+                                    : 'border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900'
+                                }`}
+                                style={cal.visible ? { backgroundColor: cal.color } : undefined}
+                              >
+                                {cal.visible && <Check className="w-2.5 h-2.5" />}
+                              </span>
+                              <span
+                                className="w-2 h-2 rounded-full shrink-0"
+                                style={{ backgroundColor: cal.color }}
+                              />
+                              {displayIcon && (
+                                <span className="text-xs leading-none shrink-0">
+                                  {displayIcon}
+                                </span>
+                              )}
+                              <span
+                                className={`truncate font-medium ${
+                                  !cal.visible ? 'line-through' : ''
+                                }`}
+                              >
+                                {cal.name}
+                              </span>
+                            </div>
+
+                            <div className="flex items-center gap-1 shrink-0">
+                              {preset && (
+                                <span
+                                  className="text-[9px] px-1.5 py-0.5 rounded font-bold hidden sm:inline"
+                                  style={{
+                                    backgroundColor: hexToRgba(preset.color, 0.14),
+                                    color: preset.color
+                                  }}
+                                >
+                                  {preset.name.split(' ')[0]}
+                                </span>
+                              )}
+                              <span className="text-[9px] text-slate-400 font-mono">
+                                {sourceShort}
+                              </span>
+                            </div>
+                          </button>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
               );
-            })
-          )}
-        </div>
+            })}
+          </div>
+        )}
       </div>
 
       {/* VIEW: MONTH */}
@@ -442,6 +712,8 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                     {dayEvents.slice(0, 4).map(evt => {
                       const cal = calendarMap.get(evt.calendarId);
                       const liveColor = cal?.color || evt.calendarColor || '#6366F1';
+                      const preset = cal ? getCalendarPresetByKey(inferCalendarCategory(cal)) : undefined;
+                      const calIcon = cal?.icon || preset?.icon;
                       const assignees = resolveEventAssignees(evt, cal, familyMembers);
                       const timeLabel = evt.allDay
                         ? 'Hele dag'
@@ -456,12 +728,13 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                           }}
                           style={{
                             borderLeftColor: liveColor,
-                            backgroundColor: hexToRgba(liveColor, evt.allDay ? 0.16 : 0.1)
+                            backgroundColor: hexToRgba(liveColor, evt.allDay || preset ? 0.18 : 0.1)
                           }}
                           className="px-1.5 py-0.5 rounded text-[11px] font-medium border-l-3 transition-all cursor-pointer hover:brightness-95 flex items-center justify-between gap-1"
-                          title={`${timeLabel} · ${evt.title} (${assignees.label})`}
+                          title={`${cal?.name || 'Agenda'} · ${timeLabel} · ${evt.title} (${assignees.label})`}
                         >
                           <div className="truncate min-w-0 text-slate-900 dark:text-slate-100">
+                            {calIcon && <span className="mr-1">{calIcon}</span>}
                             {evt.allDay ? (
                               <span className="text-[9px] font-bold uppercase text-indigo-700 dark:text-indigo-300 mr-1">
                                 [Hele dag]
@@ -555,6 +828,8 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                         {d.allDayEvents.map(evt => {
                           const cal = calendarMap.get(evt.calendarId);
                           const liveColor = cal?.color || evt.calendarColor || '#6366F1';
+                          const preset = cal ? getCalendarPresetByKey(inferCalendarCategory(cal)) : undefined;
+                          const calIcon = cal?.icon || preset?.icon;
                           const assignees = resolveEventAssignees(evt, cal, familyMembers);
                           return (
                             <div
@@ -565,13 +840,17 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                               }}
                               style={{
                                 borderLeftColor: liveColor,
-                                backgroundColor: hexToRgba(liveColor, 0.16)
+                                backgroundColor: hexToRgba(liveColor, 0.18)
                               }}
                               className="px-1.5 py-1 rounded text-[11px] font-semibold border-l-3 text-slate-900 dark:text-white flex items-center justify-between gap-1 hover:brightness-95"
-                              title={`Hele dag · ${evt.title} (${assignees.label})`}
+                              title={`${cal?.name || 'Agenda'} · Hele dag · ${evt.title} (${assignees.label})`}
                             >
                               <div className="flex items-center gap-1 truncate min-w-0">
-                                <Sun className="w-3 h-3 text-amber-500 shrink-0" />
+                                {calIcon ? (
+                                  <span className="shrink-0">{calIcon}</span>
+                                ) : (
+                                  <Sun className="w-3 h-3 text-amber-500 shrink-0" />
+                                )}
                                 <span className="truncate">{evt.title}</span>
                               </div>
                               <CalendarAssigneeBadge assignees={assignees} compact showText={false} />
@@ -651,6 +930,8 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                             const evt = seg.event;
                             const cal = calendarMap.get(evt.calendarId);
                             const liveColor = cal?.color || evt.calendarColor || '#6366F1';
+                            const preset = cal ? getCalendarPresetByKey(inferCalendarCategory(cal)) : undefined;
+                            const calIcon = cal?.icon || preset?.icon;
                             const assignees = resolveEventAssignees(evt, cal, familyMembers);
                             const topPx = (seg.startMinutes / 60) * HOUR_HEIGHT + 1;
                             const heightPx = Math.max(
@@ -704,6 +985,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                                     />
                                   </div>
                                   <div className="text-[11px] font-bold text-slate-900 dark:text-white leading-tight truncate">
+                                    {calIcon && <span className="mr-1">{calIcon}</span>}
                                     {evt.title}
                                   </div>
                                   {heightPx >= 56 && evt.location && (
@@ -718,7 +1000,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                                     <span className="font-semibold truncate">{assignees.label}</span>
                                     {cal?.name && heightPx >= 70 && (
                                       <span className="text-slate-500 dark:text-slate-400 truncate">
-                                        · {cal.icon ? `${cal.icon} ` : ''}
+                                        · {calIcon ? `${calIcon} ` : ''}
                                         {cal.name}
                                       </span>
                                     )}
@@ -785,6 +1067,10 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                   const calSource = calendarMap.get(evt.calendarId);
                   const liveColor = calSource?.color || evt.calendarColor || '#6366F1';
                   const liveCalName = calSource?.name || evt.calendarName || 'Agenda';
+                  const preset = calSource
+                    ? getCalendarPresetByKey(inferCalendarCategory(calSource))
+                    : undefined;
+                  const calIcon = calSource?.icon || preset?.icon;
                   const assignees = resolveEventAssignees(evt, calSource, familyMembers);
                   const timeFormatted = formatEventTimeDisplay(evt, dateStr, timeFormat24h);
 
@@ -792,7 +1078,17 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                     <div
                       key={evt.id}
                       onClick={() => onSelectEvent(evt)}
-                      className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 hover:border-indigo-400 dark:hover:border-indigo-600 transition-all flex items-start justify-between gap-4 cursor-pointer bg-slate-50/50 dark:bg-slate-800/40"
+                      style={
+                        preset
+                          ? {
+                              borderLeftColor: liveColor,
+                              backgroundColor: hexToRgba(liveColor, 0.08)
+                            }
+                          : undefined
+                      }
+                      className={`p-4 rounded-xl border border-slate-200 dark:border-slate-800 hover:border-indigo-400 dark:hover:border-indigo-600 transition-all flex items-start justify-between gap-4 cursor-pointer ${
+                        preset ? 'border-l-4' : 'bg-slate-50/50 dark:bg-slate-800/40'
+                      }`}
                     >
                       <div className="flex items-start gap-3.5">
                         <div
@@ -800,11 +1096,23 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                           style={{ backgroundColor: liveColor }}
                         />
                         <div className="space-y-1">
-                          <div className="flex items-center gap-2.5 flex-wrap">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            {calIcon && <span className="text-base">{calIcon}</span>}
                             <h4 className="font-bold text-slate-900 dark:text-white text-base">
                               {evt.title}
                             </h4>
                             <CalendarAssigneeBadge assignees={assignees} />
+                            {preset && (
+                              <span
+                                className="text-[10px] px-2 py-0.5 rounded font-bold"
+                                style={{
+                                  backgroundColor: hexToRgba(liveColor, 0.15),
+                                  color: liveColor
+                                }}
+                              >
+                                {preset.icon} {liveCalName}
+                              </span>
+                            )}
                           </div>
                           {evt.description && (
                             <p className="text-xs text-slate-600 dark:text-slate-400">
@@ -825,7 +1133,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                           {timeFormatted}
                         </div>
                         <div className="text-[11px] text-slate-400">
-                          {calSource?.icon ? `${calSource.icon} ` : ''}
+                          {calIcon ? `${calIcon} ` : ''}
                           {liveCalName}
                         </div>
                       </div>
@@ -935,18 +1243,28 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                     : formatEventTimeDisplay(evt, startDateStr, timeFormat24h);
 
                   const liveColor = calSource?.color || evt.calendarColor || '#6366F1';
-                  const liveCalName = calSource?.icon
-                    ? `${calSource.icon} ${calSource.name || evt.calendarName || 'Agenda'}`
-                    : calSource?.name || evt.calendarName || 'Agenda';
+                  const preset = calSource
+                    ? getCalendarPresetByKey(inferCalendarCategory(calSource))
+                    : undefined;
+                  const calIcon = calSource?.icon || preset?.icon;
+                  const liveCalName = calSource?.name || evt.calendarName || 'Agenda';
                   const assignees = resolveEventAssignees(evt, calSource, familyMembers);
 
                   return (
                     <div
                       key={evt.id}
                       onClick={() => onSelectEvent(evt)}
+                      style={
+                        preset
+                          ? {
+                              borderLeftColor: liveColor,
+                              backgroundColor: hexToRgba(liveColor, 0.06)
+                            }
+                          : undefined
+                      }
                       className={`p-4 hover:bg-slate-50 dark:hover:bg-slate-800/50 cursor-pointer flex flex-col sm:flex-row sm:items-center justify-between gap-3 transition-colors ${
-                        isPast ? 'opacity-65' : ''
-                      }`}
+                        preset ? 'border-l-4' : ''
+                      } ${isPast ? 'opacity-65' : ''}`}
                     >
                       <div className="flex items-start gap-3 min-w-0">
                         <div
@@ -954,12 +1272,25 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                           style={{ backgroundColor: liveColor }}
                         />
                         <div className="min-w-0 space-y-1">
-                          <div className="flex items-center gap-2.5 flex-wrap">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            {calIcon && <span className="text-sm">{calIcon}</span>}
                             <span className="font-bold text-slate-900 dark:text-white text-sm">
                               {evt.title}
                             </span>
 
                             <CalendarAssigneeBadge assignees={assignees} />
+
+                            {preset && (
+                              <span
+                                className="text-[10px] px-2 py-0.5 rounded font-bold"
+                                style={{
+                                  backgroundColor: hexToRgba(liveColor, 0.14),
+                                  color: liveColor
+                                }}
+                              >
+                                {preset.icon} {liveCalName}
+                              </span>
+                            )}
 
                             {evt.allDay && (
                               <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-indigo-700 dark:text-indigo-300">
@@ -999,6 +1330,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
 
                       <div className="text-left sm:text-right shrink-0 pl-6 sm:pl-0">
                         <span className="text-xs text-slate-500 dark:text-slate-400 font-medium">
+                          {calIcon ? `${calIcon} ` : ''}
                           {liveCalName}
                         </span>
                       </div>

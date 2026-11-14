@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   CalendarAssignmentMode,
+  CalendarCategory,
   CalendarMultiDayMode,
   CalendarSource,
   FamilyMember,
@@ -15,7 +16,9 @@ import {
   CALENDAR_ICONS,
   CALENDAR_PRESETS,
   CalendarPreset,
-  createCalendarFromPreset
+  createCalendarFromPreset,
+  getCalendarPresetByKey,
+  inferCalendarCategory
 } from '../utils/calendarPresets';
 import { apiUrl } from '../utils/api';
 import {
@@ -97,6 +100,7 @@ export const ManageCalendarsModal: React.FC<ManageCalendarsModalProps> = ({
   const [icalName, setIcalName] = useState('Mijn iCal Agenda');
   const [icalIcon, setIcalIcon] = useState('📅');
   const [icalColor, setIcalColor] = useState('#4285F4');
+  const [icalCategory, setIcalCategory] = useState<CalendarCategory>('general');
   const [icalAssignmentMode, setIcalAssignmentMode] = useState<CalendarAssignmentMode>('family');
   const [icalMemberIds, setIcalMemberIds] = useState<string[]>([]);
   const [icalMultiDayMode, setIcalMultiDayMode] = useState<CalendarMultiDayMode>('smart_cutoff');
@@ -114,6 +118,7 @@ export const ManageCalendarsModal: React.FC<ManageCalendarsModalProps> = ({
   const [haCalName, setHaCalName] = useState('');
   const [haCalIcon, setHaCalIcon] = useState('📅');
   const [haCalColor, setHaCalColor] = useState('#0EA5E9');
+  const [haCalCategory, setHaCalCategory] = useState<CalendarCategory>('general');
   const [haAssignmentMode, setHaAssignmentMode] = useState<CalendarAssignmentMode>('family');
   const [haMemberIds, setHaMemberIds] = useState<string[]>([]);
   const [haMultiDayMode, setHaMultiDayMode] = useState<CalendarMultiDayMode>('smart_cutoff');
@@ -121,7 +126,16 @@ export const ManageCalendarsModal: React.FC<ManageCalendarsModalProps> = ({
   const [haError, setHaError] = useState('');
   const [haSuccess, setHaSuccess] = useState('');
 
-  // Local calendar & presets form
+  // Standard Roles linking state + Local calendar form
+  const [bindingPresetKey, setBindingPresetKey] = useState<CalendarCategory | null>(null);
+  const [bindingMode, setBindingMode] = useState<'ha' | 'ical' | 'existing'>('ha');
+  const [bindingHaEntityId, setBindingHaEntityId] = useState('');
+  const [bindingIcalUrl, setBindingIcalUrl] = useState('');
+  const [bindingExistingCalId, setBindingExistingCalId] = useState('');
+  const [bindingRenameToPreset, setBindingRenameToPreset] = useState(true);
+  const [isBindingPreset, setIsBindingPreset] = useState(false);
+  const [bindingError, setBindingError] = useState('');
+
   const [localName, setLocalName] = useState('');
   const [localIcon, setLocalIcon] = useState('📅');
   const [localDescription, setLocalDescription] = useState('');
@@ -174,10 +188,10 @@ export const ManageCalendarsModal: React.FC<ManageCalendarsModalProps> = ({
   }, []);
 
   useEffect(() => {
-    if (isOpen && activeTab === 'ha') {
+    if (isOpen) {
       loadHaInfo();
     }
-  }, [isOpen, activeTab, loadHaInfo]);
+  }, [isOpen, loadHaInfo]);
 
   if (!isOpen) return null;
 
@@ -259,6 +273,7 @@ export const ManageCalendarsModal: React.FC<ManageCalendarsModalProps> = ({
         name: displayName,
         icon: haCalIcon || guessCalendarIcon(displayName, haSelectedEntityId),
         color: haCalColor,
+        category: haCalCategory !== 'general' ? haCalCategory : undefined,
         type: 'homeassistant',
         haEntityId: haSelectedEntityId,
         visible: true,
@@ -282,6 +297,7 @@ export const ManageCalendarsModal: React.FC<ManageCalendarsModalProps> = ({
         setHaCalIcon(guessCalendarIcon(nextUnlinked.name, nextUnlinked.entityId));
         setHaCalColor(HA_PALETTE[(calendars.length + 1) % HA_PALETTE.length]);
       }
+      setHaCalCategory('general');
 
       setHaSuccess(
         `Home Assistant agenda "${displayName}" gekoppeld! (${fetched.length} afspraken geladen)`
@@ -326,6 +342,7 @@ export const ManageCalendarsModal: React.FC<ManageCalendarsModalProps> = ({
         name: icalName.trim() || 'iCal Agenda',
         icon: icalIcon || guessCalendarIcon(icalName),
         color: icalColor,
+        category: icalCategory !== 'general' ? icalCategory : undefined,
         type: 'ical',
         visible: true,
         url: cleanUrl,
@@ -337,6 +354,7 @@ export const ManageCalendarsModal: React.FC<ManageCalendarsModalProps> = ({
 
       onAddCalendar(newCal);
       setIcalUrl('');
+      setIcalCategory('general');
       setIcalAssignmentMode('family');
       setIcalMemberIds([]);
       setIcalMultiDayMode('smart_cutoff');
@@ -375,19 +393,141 @@ export const ManageCalendarsModal: React.FC<ManageCalendarsModalProps> = ({
     setLocalSuccess(`Lokale agenda "${newCal.name}" toegevoegd!`);
   };
 
-  const handleAddPreset = async (preset: CalendarPreset) => {
-    const newCal = createCalendarFromPreset(preset, familyMembers);
+  const openPresetBinding = (preset: CalendarPreset) => {
+    setBindingError('');
+    if (bindingPresetKey === preset.key) {
+      setBindingPresetKey(null);
+      return;
+    }
+    setBindingPresetKey(preset.key);
+    setBindingRenameToPreset(true);
+    setBindingIcalUrl('');
+
+    if (haStatus?.connected && haCalendars.length > 0) {
+      setBindingMode('ha');
+      const unlinkedHa = haCalendars.find(hc => !linkedHaEntityIds.has(hc.entityId));
+      setBindingHaEntityId(unlinkedHa?.entityId || haCalendars[0].entityId);
+    } else if (calendars.length > 0) {
+      setBindingMode('existing');
+      setBindingExistingCalId(calendars[0].id);
+    } else {
+      setBindingMode('ical');
+    }
+  };
+
+  const handleBindPresetSubmit = async (preset: CalendarPreset) => {
+    setBindingError('');
+    setLocalSuccess('');
+    try {
+      setIsBindingPreset(true);
+
+      if (bindingMode === 'ha') {
+        if (!bindingHaEntityId) {
+          setBindingError('Kies eerst een Home Assistant agenda.');
+          return;
+        }
+        const haMeta = haCalendars.find(c => c.entityId === bindingHaEntityId);
+        // Check if this HA entity already exists on HomeBoard -> update it instead of duplicating if already present
+        const existingHaCal = calendars.find(
+          c => c.type === 'homeassistant' && c.haEntityId === bindingHaEntityId
+        );
+        if (existingHaCal) {
+          onUpdateCalendar(existingHaCal.id, {
+            category: preset.key,
+            icon: preset.icon,
+            color: preset.color,
+            name: bindingRenameToPreset ? preset.name : existingHaCal.name,
+            multiDayMode: preset.multiDayMode
+          });
+          setLocalSuccess(
+            `Bestaande HA-agenda "${haMeta?.name || bindingHaEntityId}" gekoppeld aan "${preset.icon} ${preset.name}"!`
+          );
+        } else {
+          const newCal = createCalendarFromPreset(preset, familyMembers, {
+            type: 'homeassistant',
+            haEntityId: bindingHaEntityId,
+            name: bindingRenameToPreset ? preset.name : haMeta?.name || preset.name
+          });
+          const fetched = await fetchHaCalendarEvents(newCal);
+          await onAddCalendar(newCal);
+          setLocalSuccess(
+            `"${preset.icon} ${preset.name}" gekoppeld aan Home Assistant (${bindingHaEntityId}, ${fetched.length} afspraken geladen)!`
+          );
+        }
+        setBindingPresetKey(null);
+        return;
+      }
+
+      if (bindingMode === 'ical') {
+        const cleanUrl = bindingIcalUrl.trim();
+        if (!cleanUrl) {
+          setBindingError('Vul een geldige iCal (.ics) URL in.');
+          return;
+        }
+        const testRes = await fetch(
+          apiUrl(
+            `/api/ical/fetch?url=${encodeURIComponent(cleanUrl)}&calendarName=${encodeURIComponent(preset.name)}&calendarColor=${encodeURIComponent(preset.color)}`
+          )
+        );
+        if (!testRes.ok) {
+          throw new Error('De server kon de iCal URL niet bereiken. Controleer of de link klopt.');
+        }
+        const data = await testRes.json();
+        if (data.error) throw new Error(data.error);
+
+        const newCal = createCalendarFromPreset(preset, familyMembers, {
+          type: 'ical',
+          url: cleanUrl,
+          name: preset.name
+        });
+        await onAddCalendar(newCal);
+        setLocalSuccess(
+          `"${preset.icon} ${preset.name}" gekoppeld via iCal (${data.count || 0} afspraken geladen)!`
+        );
+        setBindingIcalUrl('');
+        setBindingPresetKey(null);
+        return;
+      }
+
+      if (bindingMode === 'existing') {
+        const existing = calendars.find(c => c.id === bindingExistingCalId);
+        if (!existing) {
+          setBindingError('Selecteer een bestaande agenda.');
+          return;
+        }
+        onUpdateCalendar(existing.id, {
+          category: preset.key,
+          icon: preset.icon,
+          color: preset.color,
+          name: bindingRenameToPreset ? preset.name : existing.name,
+          multiDayMode: preset.multiDayMode
+        });
+        setLocalSuccess(
+          `Agenda "${existing.name}" gekoppeld aan rol "${preset.icon} ${preset.name}"!`
+        );
+        setBindingPresetKey(null);
+      }
+    } catch (err: any) {
+      setBindingError(err.message || 'Kon standaard agenda niet koppelen.');
+    } finally {
+      setIsBindingPreset(false);
+    }
+  };
+
+  const handleAddLocalPresetFallback = async (preset: CalendarPreset) => {
+    const newCal = createCalendarFromPreset(preset, familyMembers, { type: 'local' });
     await onAddCalendar(newCal);
-    setLocalSuccess(`Basis-agenda "${preset.icon} ${preset.name}" toegevoegd!`);
+    setLocalSuccess(`Lokale agenda "${preset.icon} ${preset.name}" toegevoegd.`);
   };
 
   const handleLoadSampleHolidays = () => {
     const holidayUrl =
       'https://calendar.google.com/calendar/ical/nl.dutch%23holiday%40group.v.calendar.google.com/public/basic.ics';
-    setIcalName('Feestdagen');
+    setIcalName('Vakanties & Feestdagen');
     setIcalIcon('✈️');
+    setIcalCategory('holidays');
     setIcalUrl(holidayUrl);
-    setIcalColor('#F59E0B');
+    setIcalColor('#8B5CF6');
   };
 
   const handleSync = async () => {
@@ -486,8 +626,8 @@ export const ManageCalendarsModal: React.FC<ManageCalendarsModalProps> = ({
                 : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
             }`}
           >
-            <Plus className="w-3.5 h-3.5" />
-            <span>Basis & Lokaal</span>
+            <Sparkles className="w-3.5 h-3.5" />
+            <span>Standaard & Lokaal</span>
           </button>
 
           <button
@@ -711,6 +851,32 @@ export const ManageCalendarsModal: React.FC<ManageCalendarsModalProps> = ({
                       </div>
                     </div>
 
+                    <div>
+                      <label className="block font-semibold mb-1 text-slate-700 dark:text-slate-300">
+                        Standaard rol / benaming (optioneel — licht extra op op Dashboard)
+                      </label>
+                      <select
+                        value={haCalCategory}
+                        onChange={e => {
+                          const cat = e.target.value as CalendarCategory;
+                          setHaCalCategory(cat);
+                          const p = getCalendarPresetByKey(cat);
+                          if (p) {
+                            setHaCalIcon(p.icon);
+                            setHaCalColor(p.color);
+                          }
+                        }}
+                        className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
+                      >
+                        <option value="general">📅 Gewone agenda (geen speciale rol)</option>
+                        {CALENDAR_PRESETS.map(p => (
+                          <option key={p.key} value={p.key}>
+                            {p.icon} {p.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
                     {renderIconPicker(haCalIcon, setHaCalIcon)}
 
                     <ColorPickerField
@@ -746,7 +912,7 @@ export const ManageCalendarsModal: React.FC<ManageCalendarsModalProps> = ({
             </div>
           )}
 
-          {/* TAB 2: BASIS-AGENDA'S & LOCAL CALENDAR */}
+          {/* TAB 2: STANDAARD AGENDA'S KOPPELEN AAN ECHTE AGENDA'S & LOCAL CALENDAR */}
           {activeTab === 'local' && (
             <div className="space-y-4">
               {localSuccess && (
@@ -756,56 +922,247 @@ export const ManageCalendarsModal: React.FC<ManageCalendarsModalProps> = ({
                 </div>
               )}
 
-              {/* 1-Click Basis-agenda's Presets */}
+              {/* Link Standard Family Roles directly to Real HA / iCal / Existing Calendars */}
               <div className="p-4 rounded-xl border border-amber-200/80 dark:border-amber-900/50 bg-amber-50/40 dark:bg-amber-950/15 space-y-3">
                 <div>
                   <div className="font-bold text-sm text-slate-900 dark:text-white flex items-center gap-1.5">
                     <Sparkles className="w-4 h-4 text-amber-500" />
-                    <span>Basis-agenda's snel toevoegen</span>
+                    <span>Standaard agenda&apos;s koppelen aan echte agenda&apos;s</span>
                   </div>
-                  <p className="text-[11px] text-slate-600 dark:text-slate-400 mt-0.5">
-                    Voeg herkenbare gezinsagenda's met eigen icoon en kleur in één klik toe.
+                  <p className="text-[11px] text-slate-600 dark:text-slate-400 mt-0.5 leading-relaxed">
+                    Koppel een echte <strong>Home Assistant</strong> kalender, een <strong>iCal (.ics) feed</strong> of een al bestaande agenda aan deze duidelijke rollen. Afspraken hieruit worden extra opvallend uitgelicht op je Dashboard en in de Kalender.
                   </p>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <div className="space-y-2.5">
                   {CALENDAR_PRESETS.map(preset => {
-                    const exists = calendars.some(
-                      c => c.name.trim().toLowerCase() === preset.name.toLowerCase()
+                    const linkedCals = calendars.filter(
+                      c => inferCalendarCategory(c) === preset.key
                     );
+                    const isExpanded = bindingPresetKey === preset.key;
+
                     return (
                       <div
                         key={preset.key}
-                        className="p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 flex items-center justify-between gap-2.5"
+                        className={`rounded-xl border transition-all ${
+                          linkedCals.length > 0
+                            ? 'border-emerald-200 dark:border-emerald-800/70 bg-white dark:bg-slate-900'
+                            : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900'
+                        }`}
                       >
-                        <div className="flex items-center gap-2.5 min-w-0">
-                          <span
-                            className="w-8 h-8 rounded-lg flex items-center justify-center text-base shrink-0"
-                            style={{ backgroundColor: `${preset.color}22` }}
-                          >
-                            {preset.icon}
-                          </span>
-                          <div className="min-w-0">
-                            <div className="font-bold text-slate-900 dark:text-white truncate">
-                              {preset.name}
+                        <div className="p-3 flex items-center justify-between gap-2.5 flex-wrap">
+                          <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                            <span
+                              className="w-9 h-9 rounded-lg flex items-center justify-center text-lg shrink-0"
+                              style={{ backgroundColor: `${preset.color}22` }}
+                            >
+                              {preset.icon}
+                            </span>
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className="font-bold text-slate-900 dark:text-white text-xs">
+                                  {preset.name}
+                                </span>
+                                {preset.highlightOnDashboard && (
+                                  <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-900/50 text-amber-800 dark:text-amber-300 font-semibold">
+                                    Uitgelicht op Dashboard
+                                  </span>
+                                )}
+                              </div>
+                              <div className="text-[11px] text-slate-500 mt-0.5">
+                                {linkedCals.length > 0 ? (
+                                  <span className="text-emerald-700 dark:text-emerald-300 font-medium">
+                                    Gekoppeld:{' '}
+                                    {linkedCals
+                                      .map(
+                                        c =>
+                                          `${c.name} (${
+                                            c.type === 'homeassistant'
+                                              ? 'Home Assistant'
+                                              : c.type === 'ical'
+                                              ? 'iCal'
+                                              : 'Lokaal'
+                                          })`
+                                      )
+                                      .join(', ')}
+                                  </span>
+                                ) : (
+                                  preset.description
+                                )}
+                              </div>
                             </div>
-                            <div className="text-[10px] text-slate-500 truncate">
-                              {preset.description}
-                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => openPresetBinding(preset)}
+                              className={`px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-colors ${
+                                isExpanded
+                                  ? 'bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-slate-200'
+                                  : 'bg-indigo-600 hover:bg-indigo-700 text-white'
+                              }`}
+                            >
+                              {isExpanded
+                                ? 'Sluiten'
+                                : linkedCals.length > 0
+                                ? '+ Extra koppelen'
+                                : 'Echte agenda koppelen'}
+                            </button>
                           </div>
                         </div>
 
-                        <button
-                          type="button"
-                          onClick={() => handleAddPreset(preset)}
-                          className={`px-2.5 py-1.5 rounded-lg text-[11px] font-semibold shrink-0 transition-colors ${
-                            exists
-                              ? 'bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800'
-                              : 'bg-indigo-600 hover:bg-indigo-700 text-white'
-                          }`}
-                        >
-                          {exists ? '+ Nog een' : '+ Toevoegen'}
-                        </button>
+                        {isExpanded && (
+                          <div className="px-3 pb-3 pt-2.5 border-t border-slate-100 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/30 space-y-3 rounded-b-xl">
+                            {/* Source type selector */}
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setBindingMode('ha');
+                                  setBindingError('');
+                                }}
+                                className={`px-2.5 py-1.5 rounded-lg font-semibold border transition-colors ${
+                                  bindingMode === 'ha'
+                                    ? 'bg-sky-600 border-sky-600 text-white'
+                                    : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300'
+                                }`}
+                              >
+                                🏠 Home Assistant
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setBindingMode('ical');
+                                  setBindingError('');
+                                }}
+                                className={`px-2.5 py-1.5 rounded-lg font-semibold border transition-colors ${
+                                  bindingMode === 'ical'
+                                    ? 'bg-indigo-600 border-indigo-600 text-white'
+                                    : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300'
+                                }`}
+                              >
+                                🔗 iCal URL (.ics)
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setBindingMode('existing');
+                                  setBindingError('');
+                                  if (!bindingExistingCalId && calendars[0]) {
+                                    setBindingExistingCalId(calendars[0].id);
+                                  }
+                                }}
+                                className={`px-2.5 py-1.5 rounded-lg font-semibold border transition-colors ${
+                                  bindingMode === 'existing'
+                                    ? 'bg-indigo-600 border-indigo-600 text-white'
+                                    : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300'
+                                }`}
+                              >
+                                📅 Bestaande agenda labelen
+                              </button>
+                            </div>
+
+                            {bindingError && (
+                              <div className="p-2 rounded-lg bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900 text-red-700 dark:text-red-300 text-[11px]">
+                                {bindingError}
+                              </div>
+                            )}
+
+                            {bindingMode === 'ha' && (
+                              <div className="space-y-2">
+                                {!haStatus?.connected ? (
+                                  <div className="text-[11px] text-amber-800 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/30 p-2.5 rounded-lg border border-amber-200 dark:border-amber-800">
+                                    Home Assistant is nog niet verbonden. Koppel eerst je URL &amp; token bij <strong>Instellingen → Home Assistant Koppeling</strong>, of kies <strong>iCal URL</strong>.
+                                  </div>
+                                ) : haCalendars.length === 0 ? (
+                                  <div className="text-[11px] text-slate-500">
+                                    Geen Home Assistant kalenders gevonden.
+                                  </div>
+                                ) : (
+                                  <select
+                                    value={bindingHaEntityId}
+                                    onChange={e => setBindingHaEntityId(e.target.value)}
+                                    className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white"
+                                  >
+                                    {haCalendars.map(hc => (
+                                      <option key={hc.entityId} value={hc.entityId}>
+                                        {hc.name} ({hc.entityId})
+                                      </option>
+                                    ))}
+                                  </select>
+                                )}
+                              </div>
+                            )}
+
+                            {bindingMode === 'ical' && (
+                              <div>
+                                <input
+                                  type="url"
+                                  value={bindingIcalUrl}
+                                  onChange={e => setBindingIcalUrl(e.target.value)}
+                                  placeholder="https://.../calendar.ics (plak hier je Google / RecycleApp / school iCal URL)"
+                                  className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono text-[11px]"
+                                />
+                              </div>
+                            )}
+
+                            {bindingMode === 'existing' && (
+                              <div>
+                                <select
+                                  value={bindingExistingCalId}
+                                  onChange={e => setBindingExistingCalId(e.target.value)}
+                                  className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white"
+                                >
+                                  {calendars.map(c => (
+                                    <option key={c.id} value={c.id}>
+                                      {c.icon || '📅'} {c.name} ({c.type === 'homeassistant' ? 'HA' : c.type === 'ical' ? 'iCal' : 'Lokaal'})
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+                            )}
+
+                            <div className="flex items-center justify-between gap-2 flex-wrap pt-1">
+                              {bindingMode !== 'ical' ? (
+                                <label className="inline-flex items-center gap-1.5 cursor-pointer text-[11px] text-slate-700 dark:text-slate-300">
+                                  <input
+                                    type="checkbox"
+                                    checked={bindingRenameToPreset}
+                                    onChange={e => setBindingRenameToPreset(e.target.checked)}
+                                    className="w-3.5 h-3.5 rounded text-indigo-600"
+                                  />
+                                  <span>Naam ook instellen als &ldquo;{preset.name}&rdquo;</span>
+                                </label>
+                              ) : (
+                                <span />
+                              )}
+
+                              <div className="flex items-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => handleAddLocalPresetFallback(preset)}
+                                  className="text-[11px] text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 underline"
+                                >
+                                  Of lokaal aanmaken
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={
+                                    isBindingPreset ||
+                                    (bindingMode === 'ha' && (!haStatus?.connected || !bindingHaEntityId))
+                                  }
+                                  onClick={() => handleBindPresetSubmit(preset)}
+                                  className="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white font-semibold"
+                                >
+                                  {isBindingPreset
+                                    ? 'Bezig...'
+                                    : `Koppel aan ${preset.icon} ${preset.name}`}
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     );
                   })}
@@ -950,6 +1307,32 @@ export const ManageCalendarsModal: React.FC<ManageCalendarsModalProps> = ({
                   />
                 </div>
 
+                <div>
+                  <label className="block font-semibold mb-1 text-slate-700 dark:text-slate-300">
+                    Standaard rol / benaming (optioneel)
+                  </label>
+                  <select
+                    value={icalCategory}
+                    onChange={e => {
+                      const cat = e.target.value as CalendarCategory;
+                      setIcalCategory(cat);
+                      const p = getCalendarPresetByKey(cat);
+                      if (p) {
+                        setIcalIcon(p.icon);
+                        setIcalColor(p.color);
+                      }
+                    }}
+                    className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
+                  >
+                    <option value="general">📅 Gewone agenda (geen speciale rol)</option>
+                    {CALENDAR_PRESETS.map(p => (
+                      <option key={p.key} value={p.key}>
+                        {p.icon} {p.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
                 {renderIconPicker(icalIcon, setIcalIcon)}
 
                 <ColorPickerField
@@ -1074,7 +1457,37 @@ export const ManageCalendarsModal: React.FC<ManageCalendarsModalProps> = ({
                         </div>
                       </div>
 
-                      <div className="pt-2.5 border-t border-slate-100 dark:border-slate-800">
+                      <div className="pt-2.5 border-t border-slate-100 dark:border-slate-800 space-y-2.5">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <label className="font-semibold text-slate-600 dark:text-slate-400">
+                            Standaard benaming / categorie:
+                          </label>
+                          <select
+                            value={cal.category || inferCalendarCategory(cal) || 'general'}
+                            onChange={e => {
+                              const cat = e.target.value as CalendarCategory;
+                              if (cat === 'general') {
+                                onUpdateCalendar(cal.id, { category: 'general' });
+                              } else {
+                                const p = getCalendarPresetByKey(cat);
+                                onUpdateCalendar(cal.id, {
+                                  category: cat,
+                                  icon: p?.icon || cal.icon,
+                                  color: p?.color || cal.color
+                                });
+                              }
+                            }}
+                            className="px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white font-medium"
+                          >
+                            <option value="general">📅 Gewone agenda</option>
+                            {CALENDAR_PRESETS.map(p => (
+                              <option key={p.key} value={p.key}>
+                                {p.icon} {p.name}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
                         <CalendarAssignmentControls
                           compact
                           familyMembers={familyMembers}

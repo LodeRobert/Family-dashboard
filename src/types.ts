@@ -1,12 +1,22 @@
 export type CalendarType = 'local' | 'ical' | 'homeassistant';
 export type CalendarAssignmentMode = 'family' | 'members';
 export type CalendarMultiDayMode = 'smart_cutoff' | 'start_day_only' | 'all_days';
+export type CalendarCategory =
+  | 'trash'
+  | 'birthdays'
+  | 'holidays'
+  | 'school'
+  | 'medical'
+  | 'sport'
+  | 'work'
+  | 'general';
 
 export interface CalendarSource {
   id: string;
   name: string;
   color: string;
   icon?: string;
+  category?: CalendarCategory;
   type: CalendarType;
   visible: boolean;
   description?: string;

@@ -39,7 +39,7 @@ interface HomeAssistantSettingsSectionProps {
   onAddRule: (rule: Omit<DailyAutomationRule, 'id'>) => void;
   onUpdateRule: (ruleId: string, patch: Partial<DailyAutomationRule>) => void;
   onDeleteRule: (ruleId: string) => void;
-  onHaStatusChanged?: () => void;
+  onHaStatusChanged?: (status?: HaStatusInfo) => void;
 }
 
 const WEEKDAYS_NL: { day: number; label: string }[] = [
@@ -98,7 +98,7 @@ export const HomeAssistantSettingsSection: React.FC<HomeAssistantSettingsSection
       setIsLoadingStatus(true);
       const st = await fetchHaStatus();
       setHaStatus(st);
-      if (st.haUrl && st.mode === 'manual') {
+      if (st.haUrl) {
         setHaUrlInput(st.haUrl);
       }
       if (st.connected) {
@@ -127,22 +127,32 @@ export const HomeAssistantSettingsSection: React.FC<HomeAssistantSettingsSection
 
   const handleSaveHaConfig = async (e: React.FormEvent) => {
     e.preventDefault();
+    const cleanedUrl = haUrlInput.trim();
+    if (!cleanedUrl && !haStatus?.addonMode) {
+      setHaFeedback({ type: 'err', msg: 'Vul je Home Assistant URL in (bijv. http://192.168.1.50:8123).' });
+      return;
+    }
+
     try {
       setIsSavingHa(true);
       setHaFeedback(null);
       const st = await saveHaConfig({
-        haUrl: haUrlInput.trim(),
+        haUrl: cleanedUrl,
         haToken: haTokenInput.trim() || undefined
       });
       setHaStatus(st);
-      setHaTokenInput('');
+      if (st.haUrl) {
+        setHaUrlInput(st.haUrl);
+      }
+      onHaStatusChanged?.(st);
+
       if (st.connected) {
+        setHaTokenInput('');
         setHaFeedback({
           type: 'ok',
-          msg: `Verbonden met ${st.locationName || 'Home Assistant'} (v${st.version || '?'})!`
+          msg: `Opgeslagen en verbonden met ${st.locationName || 'Home Assistant'} (v${st.version || '?'})!`
         });
         await loadStatusAndEntities();
-        onHaStatusChanged?.();
       } else {
         setHaFeedback({
           type: 'err',
@@ -151,6 +161,24 @@ export const HomeAssistantSettingsSection: React.FC<HomeAssistantSettingsSection
       }
     } catch (err: any) {
       setHaFeedback({ type: 'err', msg: err.message || 'Kon koppeling niet opslaan.' });
+    } finally {
+      setIsSavingHa(false);
+    }
+  };
+
+  const handleClearHaConfig = async () => {
+    try {
+      setIsSavingHa(true);
+      setHaFeedback(null);
+      const st = await saveHaConfig({ haUrl: '', clearToken: true });
+      setHaStatus(st);
+      setHaUrlInput('');
+      setHaTokenInput('');
+      setHaEntities([]);
+      onHaStatusChanged?.(st);
+      setHaFeedback({ type: 'ok', msg: 'Home Assistant koppeling gewist.' });
+    } catch (err: any) {
+      setHaFeedback({ type: 'err', msg: err.message || 'Kon koppeling niet wissen.' });
     } finally {
       setIsSavingHa(false);
     }
@@ -166,7 +194,7 @@ export const HomeAssistantSettingsSection: React.FC<HomeAssistantSettingsSection
       });
       setHaFeedback({
         type: 'ok',
-        msg: `Verbinding geslaagd met "${result.locationName}"! Gevonden: ${result.calendarCount ?? 0} agenda's en ${result.todoCount ?? 0} to-do lijsten.`
+        msg: `Verbinding geslaagd met "${result.locationName}"! Gevonden: ${result.calendarCount ?? 0} agenda's en ${result.todoCount ?? 0} to-do lijsten. Vergeet niet op "Koppeling opslaan" te klikken als je een nieuwe URL/token hebt ingevuld.`
       });
     } catch (err: any) {
       setHaFeedback({ type: 'err', msg: err.message || 'Verbindingstest mislukt.' });
@@ -344,7 +372,7 @@ export const HomeAssistantSettingsSection: React.FC<HomeAssistantSettingsSection
                 Home Assistant URL {haStatus?.addonMode ? '(optionele overschrijving)' : ''}
               </label>
               <input
-                type="url"
+                type="text"
                 value={haUrlInput}
                 onChange={e => setHaUrlInput(e.target.value)}
                 placeholder="http://homeassistant.local:8123"
@@ -379,7 +407,17 @@ export const HomeAssistantSettingsSection: React.FC<HomeAssistantSettingsSection
             <p className="text-[11px] text-slate-500">
               Maak een token in Home Assistant via <strong>Profiel → Beveiliging → Langlevende toegangstokens</strong> (alleen nodig buiten de Add-on).
             </p>
-            <div className="flex items-center gap-2 shrink-0">
+            <div className="flex items-center gap-2 shrink-0 flex-wrap">
+              {(haStatus?.hasToken || haStatus?.haUrl) && (
+                <button
+                  type="button"
+                  onClick={handleClearHaConfig}
+                  disabled={isSavingHa}
+                  className="px-3 py-2 rounded-lg border border-red-200 dark:border-red-900/60 hover:bg-red-50 dark:hover:bg-red-950/40 font-semibold text-red-600 dark:text-red-400"
+                >
+                  Ontkoppelen
+                </button>
+              )}
               <button
                 type="button"
                 onClick={handleTestHa}

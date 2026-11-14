@@ -3,6 +3,7 @@ import {
   AppSettings,
   AppState,
   CalendarAssignmentMode,
+  CalendarCategory,
   CalendarEvent,
   CalendarMultiDayMode,
   CalendarSource,
@@ -11,6 +12,7 @@ import {
   ClothingAdviceRule,
   DailyAutomationRule,
   FamilyMember,
+  HaStatusInfo,
   RewardItem,
   WeatherLocationResult
 } from '../types';
@@ -23,8 +25,8 @@ import { getCalendarAssignees } from '../utils/calendarHelpers';
 import {
   CALENDAR_ICONS,
   CALENDAR_PRESETS,
-  CalendarPreset,
-  createCalendarFromPreset
+  getCalendarPresetByKey,
+  inferCalendarCategory
 } from '../utils/calendarPresets';
 import {
   DEFAULT_CLOTHING_RAIN_ADVICE,
@@ -96,7 +98,7 @@ interface SettingsViewProps {
   onAddDailyRule: (rule: Omit<DailyAutomationRule, 'id'>) => void;
   onUpdateDailyRule: (ruleId: string, patch: Partial<DailyAutomationRule>) => void;
   onDeleteDailyRule: (ruleId: string) => void;
-  onHaStatusChanged?: () => void;
+  onHaStatusChanged?: (status?: HaStatusInfo) => void;
   onLockSettings: () => void;
   onRestoreState: (state: AppState) => Promise<void>;
 }
@@ -211,6 +213,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [newCalIcon, setNewCalIcon] = useState('📅');
   const [newCalColor, setNewCalColor] = useState('#8B5CF6');
   const [newCalDescription, setNewCalDescription] = useState('');
+  const [newCalCategory, setNewCalCategory] = useState<CalendarCategory>('general');
   const [newCalAssignmentMode, setNewCalAssignmentMode] = useState<CalendarAssignmentMode>('family');
   const [newCalMemberIds, setNewCalMemberIds] = useState<string[]>([]);
   const [newCalMultiDayMode, setNewCalMultiDayMode] = useState<CalendarMultiDayMode>('smart_cutoff');
@@ -570,6 +573,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       name: newCalName.trim(),
       icon: newCalIcon || '📅',
       color: newCalColor,
+      category: newCalCategory !== 'general' ? newCalCategory : undefined,
       type: 'local',
       visible: true,
       description: newCalDescription.trim() || 'Lokale gezinsagenda',
@@ -582,15 +586,25 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     setNewCalName('');
     setNewCalIcon('📅');
     setNewCalDescription('');
+    setNewCalCategory('general');
     setNewCalAssignmentMode('family');
     setNewCalMemberIds([]);
     setNewCalMultiDayMode('smart_cutoff');
     setIsAddingCalendar(false);
   };
 
-  const handleAddPresetCalendar = (preset: CalendarPreset) => {
-    const newCal = createCalendarFromPreset(preset, familyMembers);
-    onUpdateCalendars([...calendars, newCal]);
+  const handleAssignCalendarCategory = (calId: string, catVal: CalendarCategory) => {
+    if (catVal === 'general') {
+      handleUpdateCalendarField(calId, { category: 'general' });
+      return;
+    }
+    const preset = getCalendarPresetByKey(catVal);
+    if (!preset) return;
+    handleUpdateCalendarField(calId, {
+      category: catVal,
+      icon: preset.icon,
+      color: preset.color
+    });
   };
 
   const handleDeleteCalendar = (calId: string) => {
@@ -2473,33 +2487,79 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </div>
         </div>
 
-        {/* Quick 1-click Basis-agenda's strip */}
-        <div className="p-3.5 rounded-xl border border-amber-200/80 dark:border-amber-900/50 bg-amber-50/40 dark:bg-amber-950/15 space-y-2.5 text-xs">
-          <div className="font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
-            <Sparkles className="w-4 h-4 text-amber-500" />
-            <span>Basis-agenda's snel toevoegen (met duidelijke iconen):</span>
+        {/* Standard Calendar Roles linked to real calendars */}
+        <div className="p-4 rounded-xl border border-amber-200/80 dark:border-amber-900/50 bg-amber-50/40 dark:bg-amber-950/15 space-y-3 text-xs">
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <div>
+              <div className="font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+                <Sparkles className="w-4 h-4 text-amber-500" />
+                <span>Standaard gezinsagenda&apos;s koppelen aan echte agenda&apos;s</span>
+              </div>
+              <p className="text-[11px] text-slate-500 mt-0.5">
+                Koppel je echte Home Assistant of iCal agenda&apos;s aan rollen zoals Vuilbakkenophaling, Verjaardagen, Vakanties en School zodat ze extra duidelijk oplichten op het Dashboard en in de Kalender.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={onOpenManageCalendars}
+              className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-white font-semibold shrink-0"
+            >
+              Standaard rol koppelen
+            </button>
           </div>
-          <div className="flex items-center gap-2 flex-wrap">
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
             {CALENDAR_PRESETS.map(preset => {
-              const exists = calendars.some(
-                c => c.name.trim().toLowerCase() === preset.name.toLowerCase()
-              );
+              const linked = calendars.filter(c => inferCalendarCategory(c) === preset.key);
+              const realLinked = linked.filter(c => c.type !== 'local');
               return (
-                <button
+                <div
                   key={preset.key}
-                  type="button"
-                  onClick={() => handleAddPresetCalendar(preset)}
-                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border font-semibold transition-colors ${
-                    exists
-                      ? 'bg-emerald-50 dark:bg-emerald-950/50 border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300'
-                      : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 hover:border-indigo-400 text-slate-800 dark:text-slate-200'
+                  onClick={onOpenManageCalendars}
+                  className={`p-2.5 rounded-xl border cursor-pointer transition-colors flex items-center justify-between gap-2 ${
+                    linked.length > 0
+                      ? 'bg-emerald-50/70 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800/70'
+                      : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 hover:border-indigo-400'
                   }`}
-                  title={preset.description}
                 >
-                  <span>{preset.icon}</span>
-                  <span>{preset.name}</span>
-                  <span className="text-[10px] opacity-75">{exists ? '✓' : '+'}</span>
-                </button>
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span
+                      className="w-7 h-7 rounded-lg flex items-center justify-center text-sm shrink-0"
+                      style={{ backgroundColor: `${preset.color}22` }}
+                    >
+                      {preset.icon}
+                    </span>
+                    <div className="min-w-0">
+                      <div className="font-bold text-slate-900 dark:text-white truncate">
+                        {preset.name}
+                      </div>
+                      <div className="text-[10px] text-slate-500 truncate">
+                        {linked.length > 0
+                          ? realLinked.length > 0
+                            ? `Gekoppeld: ${realLinked.map(c => c.name).join(', ')}`
+                            : `Lokaal: ${linked.map(c => c.name).join(', ')}`
+                          : 'Nog niet gekoppeld — klik om te koppelen'}
+                      </div>
+                    </div>
+                  </div>
+                  <span
+                    className={`text-[10px] px-1.5 py-0.5 rounded font-semibold shrink-0 ${
+                      realLinked.length > 0
+                        ? 'bg-emerald-100 dark:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300'
+                        : linked.length > 0
+                        ? 'bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-300'
+                        : 'bg-slate-100 dark:bg-slate-800 text-slate-500'
+                    }`}
+                  >
+                    {realLinked.length > 0
+                      ? realLinked[0].type === 'homeassistant'
+                        ? 'HA ✓'
+                        : 'iCal ✓'
+                      : linked.length > 0
+                      ? 'Lokaal'
+                      : 'Koppelen'}
+                  </span>
+                </div>
               );
             })}
           </div>
@@ -2669,7 +2729,28 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   </div>
                 </div>
 
-                <div className="pt-2.5 border-t border-slate-200/70 dark:border-slate-700/60">
+                <div className="pt-2.5 border-t border-slate-200/70 dark:border-slate-700/60 space-y-3">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <label className="font-semibold text-slate-600 dark:text-slate-400">
+                      Standaard benaming / categorie:
+                    </label>
+                    <select
+                      value={cal.category || inferCalendarCategory(cal) || 'general'}
+                      onChange={e =>
+                        handleAssignCalendarCategory(cal.id, e.target.value as CalendarCategory)
+                      }
+                      className="px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 font-medium"
+                    >
+                      <option value="general">📅 Gewone agenda (geen speciale highlight)</option>
+                      {CALENDAR_PRESETS.map(preset => (
+                        <option key={preset.key} value={preset.key}>
+                          {preset.icon} {preset.name}
+                          {preset.highlightOnDashboard ? ' (Uitgelicht)' : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
                   <CalendarAssignmentControls
                     compact
                     familyMembers={familyMembers}

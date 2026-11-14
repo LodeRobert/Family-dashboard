@@ -8,6 +8,7 @@ import {
   DailyAutomationRule,
   FamilyMember,
   GeneralTask,
+  HaStatusInfo,
   LinkedHaTodoList,
   RewardItem,
   StarLogEntry,
@@ -529,6 +530,17 @@ export default function App() {
     }));
   };
 
+  const handleSetCalendarsVisibility = async (updates: Record<string, boolean>) => {
+    await updateStateAndPersist(prev => ({
+      ...prev,
+      calendars: prev.calendars.map(c =>
+        Object.prototype.hasOwnProperty.call(updates, c.id)
+          ? { ...c, visible: updates[c.id] }
+          : c
+      )
+    }));
+  };
+
   // Chore & Star Log Handlers (supports today + adjusting previous days)
   const handleToggleChore = async (choreId: string, dateStr: string) => {
     await updateStateAndPersist(prev => {
@@ -968,6 +980,7 @@ export default function App() {
             onSelectEvent={handleSelectEvent}
             onOpenManageCalendars={() => setIsManageCalendarsOpen(true)}
             onToggleCalendarVisibility={handleToggleCalendarVisibility}
+            onSetCalendarsVisibility={handleSetCalendarsVisibility}
           />
         )}
 
@@ -1029,7 +1042,24 @@ export default function App() {
               onAddDailyRule={handleAddDailyRule}
               onUpdateDailyRule={handleUpdateDailyRule}
               onDeleteDailyRule={handleDeleteDailyRule}
-              onHaStatusChanged={() => refreshExternalCalendars(appState.calendars)}
+              onHaStatusChanged={(st?: HaStatusInfo) => {
+                if (st) {
+                  setAppState(prev =>
+                    prev
+                      ? {
+                          ...prev,
+                          settings: {
+                            ...prev.settings,
+                            haUrl: st.haUrl || '',
+                            hasHaToken: Boolean(st.hasToken),
+                            haAddonMode: Boolean(st.addonMode)
+                          }
+                        }
+                      : prev
+                  );
+                }
+                refreshExternalCalendars(appState.calendars);
+              }}
               onLockSettings={() => setIsSettingsUnlocked(false)}
               onRestoreState={async newState => {
                 setAppState(newState);

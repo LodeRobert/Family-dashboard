@@ -424,7 +424,7 @@ app.get('/api/storage/state', (_req: Request, res: Response) => {
   res.json(sanitizeStateForClient(data));
 });
 
-// Update state (preserves server-side settingsPasswordHash and haToken)
+// Update state (preserves server-side settingsPasswordHash, haUrl and haToken)
 app.post('/api/storage/state', (req: Request, res: Response) => {
   try {
     const updated = req.body;
@@ -434,9 +434,11 @@ app.post('/api/storage/state', (req: Request, res: Response) => {
     const current = getRawStoredData();
     const {
       hasSettingsPassword: _ignorePw,
+      settingsPasswordHash: _ignorePwHash,
       hasHaToken: _ignoreHa,
       haAddonMode: _ignoreAddon,
       haToken: _ignoreRawToken,
+      haUrl: _ignoreHaUrl,
       ...incomingSettings
     } = updated.settings || {};
     const mergedToSave = {
@@ -445,6 +447,7 @@ app.post('/api/storage/state', (req: Request, res: Response) => {
         ...current.settings,
         ...incomingSettings,
         settingsPasswordHash: current.settings?.settingsPasswordHash || '',
+        haUrl: current.settings?.haUrl || '',
         haToken: current.settings?.haToken || ''
       }
     };
@@ -825,6 +828,16 @@ interface HaConnectionConfig {
   hasToken: boolean;
 }
 
+function normalizeHaUrl(rawUrl: string): string {
+  let clean = String(rawUrl || '').trim();
+  if (!clean) return '';
+  if (!/^https?:\/\//i.test(clean)) {
+    clean = `http://${clean}`;
+  }
+  clean = clean.replace(/\/+$/, '');
+  return clean;
+}
+
 function getHaConnectionConfig(
   data?: any,
   overrideUrl?: string,
@@ -832,9 +845,7 @@ function getHaConnectionConfig(
 ): HaConnectionConfig {
   const supervisorToken = (process.env.SUPERVISOR_TOKEN || '').trim();
   const addonOpts = readHaAddonOptions();
-  const storedUrl = (overrideUrl ?? data?.settings?.haUrl ?? addonOpts.ha_url ?? '')
-    .trim()
-    .replace(/\/+$/, '');
+  const storedUrl = normalizeHaUrl(overrideUrl ?? data?.settings?.haUrl ?? addonOpts.ha_url ?? '');
   const storedToken = (overrideToken ?? data?.settings?.haToken ?? addonOpts.ha_token ?? '').trim();
 
   if (storedUrl && storedToken) {
@@ -1034,7 +1045,7 @@ app.get('/api/ha/status', async (_req: Request, res: Response) => {
 // Save HA manual URL/Token configuration & return updated status
 app.post('/api/ha/config', async (req: Request, res: Response) => {
   try {
-    const rawUrl = String(req.body?.haUrl || '').trim().replace(/\/+$/, '');
+    const rawUrl = normalizeHaUrl(String(req.body?.haUrl || ''));
     const rawToken = req.body?.haToken !== undefined ? String(req.body.haToken).trim() : undefined;
     const clearToken = Boolean(req.body?.clearToken);
 
